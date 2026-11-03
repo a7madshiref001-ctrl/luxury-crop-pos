@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#F4F0E8">
+<title>محصول فاخر · الباريستا</title>
+<link rel="icon" href="assets/brand/logo-mark.png" type="image/png">
+
+<link rel="stylesheet" href="assets/darj.css?v=1">
+<link rel="stylesheet" href="assets/brand.css?v=1">
+<style>
+  body{min-height:100dvh}
+  .kbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+  .kbar__t{display:grid;line-height:1.1}
+  .kbar__t b{font-family:var(--f-en);font-weight:700;font-size:22px;letter-spacing:-.02em;direction:ltr;text-align:right}
+  .kbar__sp{flex:1}
+  .kstat{display:grid;line-height:1.15;text-align:center;padding:0 12px;border-inline-start:1px solid var(--line)}
+  .kstat b{font-family:var(--f-en);font-size:20px;font-weight:700}
+  .kstat small{font-size:11px;color:var(--muted)}
+  .clock{font-family:var(--f-en);font-weight:700;font-size:22px;direction:ltr}
+  @media (max-width:640px){.kstat{display:none}}
+</style>
+</head>
+<body>
+<header class="kbar">
+  <a href="index.html" id="brand"></a>
+    <span class="kbar__t"><span class="label">Barista · KDS</span><b>Bar 1</b></span>
+  <span class="kbar__sp"></span>
+  <span class="kstat"><b id="sOpen">0</b><small>في الطابور</small></span>
+  <span class="kstat"><b id="sAvg">0:00</b><small>متوسط التحضير</small></span>
+  <span class="kstat"><b id="sDone">0</b><small>سُلّم اليوم</small></span>
+  <div class="seg" id="lang"><button data-l="ar">ع</button><button data-l="en" class="on">EN</button></div>
+  <button class="icon-btn" id="snd" title="الصوت"></button>
+  <span class="clock" id="clk"></span>
+</header>
+<main id="k"></main>
+<script src="assets/config.js?v=1"></script>
+<script src="assets/menu.js?v=1"></script>
+<script src="assets/darj.js?v=1"></script>
+<script src="assets/kds.js?v=1"></script>
+<script>
+(function () {
+  const D = window.DARJ;
+  D.startLive();
+  document.getElementById('brand').innerHTML = D.brand();
+  const k = window.DARJ_KDS.mount(document.getElementById('k'), { lang: 'en' });
+  const lang = document.getElementById('lang');
+  lang.addEventListener('click', (e) => { const b = e.target.closest('[data-l]'); if (!b) return; lang.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); k.setLang(b.dataset.l); });
+  const snd = document.getElementById('snd');
+  const paintSnd = () => { snd.innerHTML = D.icon(D.state().settings.sound ? 'volume' : 'x'); };
+  snd.addEventListener('click', () => { D.mutate((s) => { s.settings.sound = !s.settings.sound; }, 'set'); paintSnd(); });
+  function stats() {
+    const s = D.state();
+    const drinks = (o) => o.lines.some((l) => D.isDrink(D.prod(l.pid)));
+    const done = s.orders.filter((o) => drinks(o) && o.tsReady && o.tsAcc);
+    const avg = done.length ? done.reduce((a, o) => a + (o.tsReady - o.tsAcc), 0) / done.length : 0;
+    document.getElementById('sOpen').textContent = s.orders.filter((o) => drinks(o) && o.status === 'prep').length;
+    document.getElementById('sAvg').textContent = D.mmss(avg);
+    document.getElementById('sDone').textContent = s.orders.filter((o) => drinks(o) && o.status === 'done').length;
+    document.getElementById('clk').textContent = D.time(Date.now(), true);
+  }
+  D.on(stats); setInterval(stats, 5000); stats(); paintSnd();
+})();
+</script>
+</body>
+</html>
