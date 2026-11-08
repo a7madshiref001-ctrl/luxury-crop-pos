@@ -24,7 +24,7 @@
   const ROUTES = [
     { id: 'sell', en: 'Sell', ar: 'البيع', ic: 'register', perm: 'sell' },
     { id: 'orders', en: 'Orders', ar: 'الطلبات', ic: 'orders', perm: 'sell' },
-    { id: 'kds', en: 'Barista', ar: 'الباريستا', ic: 'cup', perm: 'kds' },
+    { id: 'kds', en: 'Stations', ar: 'الباريستا والمطبخ', ic: 'cup', perm: 'kds' },
     { id: 'shift', en: 'Shift', ar: 'الوردية', ic: 'shift', perm: 'close' },
     { id: 'menu', en: 'Menu', ar: 'المنيو', ic: 'menu', perm: 'avail' },
     { id: 'stock', en: 'Stock', ar: 'المخزون', ic: 'stock', perm: 'stock' },
@@ -85,6 +85,35 @@
     const unread = s.feed.filter((f) => f.ts > feedSeen).length;
     $('#bellN').hidden = !unread; $('#bellN').textContent = unread;
     $('#me').innerHTML = `${D.av(user)}<span class="me__txt"><b>${esc(user.short)}</b><small>${D.ROLES[user.role].ar}</small></span>`;
+    drawInbox();
+  }
+  // الطلبات المستنية موافقة الكاشير (الموقع) أو تحصيل (الكشك): كارت ثابت في أي صفحة
+  let inboxMin = false;
+  function drawInbox() {
+    let box = $('#inbox');
+    const s = S();
+    const list = me && can('sell') === 1 ? s.orders.filter((o) => o.status === 'new').sort((a, b) => a.ts - b.ts) : [];
+    const hide = !list.length || (route === 'orders' && otab === 'online') || document.querySelector('.lock');
+    if (hide) { if (box) box.remove(); return; }
+    if (!box) { box = document.createElement('div'); box.id = 'inbox'; box.className = 'inbox'; document.body.appendChild(box); box.addEventListener('click', inboxClick); }
+    const o = list[0];
+    const src = o.ch === 'kiosk' ? `الكشك · ${D.TYPES[o.type].ar}` : `${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}${o.label ? ' · ' + esc(o.label) : ''}`;
+    const items = o.lines.map((l) => `${l.qty}× ${D.prod(l.pid).ar}`).join('، ');
+    const sts = D.stationsOf(s, o).map((x) => D.STATIONS[x].ar).join(' + ');
+    box.className = 'inbox' + (inboxMin ? ' min' : '');
+    box.innerHTML = `<div class="inbox__h"><span><i class="dot pulse"></i>${bi('Incoming · ' + list.length, o.payFirst ? 'بانتظار الدفع عند الكاشير' : 'بانتظار موافقتك')}</span><button class="icon-btn" data-ib="min" aria-label="تصغير">${I(inboxMin ? 'plus' : 'minus', 'sm')}</button></div>
+      ${inboxMin ? '' : `<div class="inbox__o"><span class="ocard__no"><b>#${o.no}</b><small>${D.ago(o.ts)}</small></span><div style="min-width:0"><b>${esc(o.name || 'عميل')} · ${src}</b><p>${esc(items)}</p><small>${money(o.total)} · ${o.payFirst ? 'يدفع عند الكاشير' : o.unpaid ? 'الدفع عند الكاشير' : 'مدفوع'}${sts ? ' · يذهب إلى ' + sts : ''}</small></div></div>
+      <div class="inbox__a">${o.payFirst ? `<button class="btn btn--ghost btn--sm" data-ib="kcancel" data-id="${o.id}">${bi('Cancel', 'إلغاء')}</button><button class="btn btn--go btn--sm" data-ib="collect" data-id="${o.id}">${I('cash', 'sm')}${bi('Collect', 'تحصيل')}</button>` : `<button class="btn btn--ghost btn--sm" data-ib="reject" data-id="${o.id}">${bi('Reject', 'رفض')}</button><button class="btn btn--go btn--sm" data-ib="accept" data-id="${o.id}">${I('check', 'sm')}${bi('Accept', 'اقبل وأرسل للتحضير')}</button>`}${list.length > 1 ? `<button class="btn btn--soft btn--sm" data-ib="all">${bi('All · ' + list.length, 'الكل')}</button>` : ''}</div>`}`;
+  }
+  function inboxClick(e) {
+    const b = e.target.closest('[data-ib]'); if (!b) return;
+    const a = b.dataset.ib, id = b.dataset.id;
+    if (a === 'min') { inboxMin = !inboxMin; drawInbox(); return; }
+    if (a === 'all') { otab = 'online'; go('orders'); return; }
+    if (a === 'accept') acceptOrder(id);
+    if (a === 'reject') rejectOnline(id);
+    if (a === 'kcancel') cancelKiosk(id);
+    if (a === 'collect') openPay(S().orders.find((x) => x.id === id));
   }
   function moreRoutes() {
     const m = D.modal(`${D.head(bi('All pages', 'كل الصفحات'))}<div class="modal__b"><div class="grid g2" style="gap:8px">${ROUTES.slice(4).map((r) => `<button class="dev" data-go="${r.id}" style="padding:12px;border:1px solid var(--line);border-radius:14px;${can(r.perm) ? '' : 'opacity:.5'}"><span class="dev__i">${I(r.ic)}</span><span class="dev__b">${bi(r.en, r.ar)}<small>${can(r.perm) ? '' : 'غير متاحة لدورك'}</small></span></button>`).join('')}</div></div>`, { cls: 'modal--sm' });
@@ -171,7 +200,7 @@
       if (step === 3) body = `<div class="done-ok">${check()}<b style="font-size:18px">${bi('Ready to open', 'النظام جاهز')}</b><span class="muted">${esc(f.nameAr)} · ${esc(f.branchAr)} · ${f.vatOn ? 'فاتورة ضريبية' : 'إيصال بدون ضريبة'}</span></div>
         <div class="blind">${I('drawer', 'sm')}<span>الخطوة الجاية: افتح أول وردية بالعهدة اللي في الدرج، وابدأ البيع. كل الأرقام تبدأ من الصفر.</span></div>`;
       el.innerHTML = `<div class="pin" style="width:min(640px,100%)">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">${D.brand()}<span class="label">First-time setup</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">${D.brand()}<span style="display:flex;align-items:center;gap:8px"><button class="btn btn--soft btn--sm" id="sTrain" title="جرّب النظام ببيانات تجريبية أولًا">${I('play', 'sm')}${bi('Training', 'جرّب أولًا')}</button><span class="label">First-time setup</span></span></div>
         ${stepper(STEPS, step)}
         <div class="wz">${body}</div>
         ${err ? `<div class="blind" style="margin-top:12px;color:var(--red)">${I('alert', 'sm')}<span>${err}</span></div>` : ''}
@@ -183,6 +212,7 @@
         if (step === 2) Object.assign(f, { owner: v('fOwner'), pin: v('fPin'), pin2: v('fPin2') });
       };
       $$('[data-vat]', el).forEach((b) => b.addEventListener('click', () => { grab(); f.vatOn = b.dataset.vat === '1'; paint(); }));
+      $('#sTrain', el).addEventListener('click', () => D.setTraining(true));
       if ($('#sBack', el)) $('#sBack', el).addEventListener('click', () => { grab(); step -= 1; paint(); });
       $('#sNext', el).addEventListener('click', () => {
         grab();
@@ -233,7 +263,7 @@
     el.innerHTML = `<div class="pop__h" style="gap:10px;justify-content:flex-start">${D.av(u)}<span><b>${esc(u.name)}</b><br><small class="muted">${D.ROLES[u.role].ar} · كاشير 1</small></span></div>
       <div class="feed"><div style="cursor:pointer" data-a="switch"><span class="fi">${I('users')}</span><span><b>تبديل المستخدم</b><small>دخول موظف آخر برمز PIN</small></span></div>
       <div style="cursor:pointer" data-a="lock"><span class="fi">${I('lock')}</span><span><b>قفل الشاشة</b><small>لما تسيب الكاشير</small></span></div>
-      <div style="cursor:pointer" data-a="screens"><span class="fi">${I('kds')}</span><span><b>الشاشات الأخرى</b><small>شاشة الباريستا وشاشة العميل</small></span></div></div>`;
+      <div style="cursor:pointer" data-a="screens"><span class="fi">${I('kds')}</span><span><b>الشاشات الأخرى</b><small>الباريستا والمطبخ والكشك وشاشة الطلبات</small></span></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click', (ev) => {
       const a = ev.target.closest('[data-a]'); if (!a) return;
@@ -246,6 +276,12 @@
   }
   document.addEventListener('click', (e) => { if (!e.target.closest('.pop')) closePops(); });
   function openScreens() {
+    const m = D.modal(`${D.head(bi('Screens', 'الشاشات المربوطة بالكاشير'), 'افتح أي شاشة هنا، أو اربطها بجهاز آخر عبر QR')}<div class="modal__b">${devicesCard()}</div>`, { cls: 'modal--wide' });
+    m.querySelectorAll('[data-pair]').forEach((b) => b.addEventListener('click', () => pairModal(b.dataset.pair)));
+    const rot = m.querySelector('#lnkRot'); if (rot) rot.remove();
+  }
+  // eslint-disable-next-line no-unused-vars
+  function openScreensOld() {
     D.modal(`${D.head('الشاشات المربوطة بالكاشير', 'افتح كل شاشة في تبويب أو جهاز مستقل — جميعها تتحدّث لحظة بلحظة')}
       <div class="modal__b"><div class="dev"><span class="dev__i">${I('cup')}</span><span class="dev__b"><b>شاشة الباريستا</b><small>تصلها الطلبات فور إتمام الدفع، بالإضافات والملاحظات</small></span><a class="btn btn--ghost btn--sm" href="kds.html" target="_blank">افتح</a></div>
       <div class="dev"><span class="dev__i">${I('kds')}</span><span class="dev__b"><b>شاشة «طلبك جاهز»</b><small>للعملاء: الطلبات قيد التحضير والجاهزة</small></span><a class="btn btn--ghost btn--sm" href="screen.html" target="_blank">افتح</a></div>
@@ -702,7 +738,7 @@
     const TEN = { mada: ['mada', 'مدى'], apple: ['Apple Pay', 'الجوال'], cash: ['Cash', 'كاش'], stc: ['STC Pay', 'المحفظة'] };
     const STEPS = [['Tender', 'طريقة الدفع'], ['Confirm', 'التأكيد'], ['Receipt', 'الفاتورة']];
     if (!ord) cartBroadcast('pay');
-    const m = D.modal(`${D.head(bi(ord ? 'Collect' : 'Charge', ord ? 'تحصيل طلب المنيو' : 'الدفع'), ord ? `طلب #${ord.no} · ${esc(ord.name || '')} · ${D.CH[ord.ch].ar}${ord.table ? ' ' + ord.table : ''}` : `طلب #${S().seq.no + 1} · ${cart.lines.reduce((a, l) => a + l.qty, 0)} صنف`)}<div class="modal__b"><div id="pst"></div><div id="pb"></div></div>`, { cls: 'modal--wide', sticky: true, onClose: (v) => { if (v !== 'paid') cartBroadcast(); } });
+    const m = D.modal(`${D.head(bi(ord ? 'Collect' : 'Charge', ord ? (ord.ch === 'kiosk' ? 'تحصيل طلب الكشك' : 'تحصيل طلب المنيو') : 'الدفع'), ord ? `طلب #${ord.no} · ${esc(ord.name || '')} · ${D.CH[ord.ch].ar}${ord.table ? ' ' + ord.table : ''}` : `طلب #${S().seq.no + 1} · ${cart.lines.reduce((a, l) => a + l.qty, 0)} صنف`)}<div class="modal__b"><div id="pst"></div><div id="pb"></div></div>`, { cls: 'modal--wide', sticky: true, onClose: (v) => { if (v !== 'paid') cartBroadcast(); } });
     const takeLabel = () => {
       const x = fmt(Math.min(amount, remaining()) || 0);
       return method === 'cash' ? `${I('cash')}${bi('Take ' + x + ' cash', 'استلام كاش')}` : method === 'stc' ? `${I('qr')}${bi('Send ' + x + ' to STC Pay', 'العميل يؤكد من التطبيق')}` : `${I('card')}${bi('Send ' + x + ' to terminal', 'المبلغ يُرسل لجهاز الشبكة')}`;
@@ -790,8 +826,8 @@
   function showReceipt(o, copy, fresh) {
     const s = S();
     const z = D.tlv(o);
-    const hasDrink = o.lines.some((l) => D.isDrink(D.prod(l.pid)));
-    const m = D.modal(`${D.head(fresh ? bi('Paid', 'تم الدفع') : bi('Invoice ' + o.inv, 'الفاتورة'), fresh ? `طلب #${o.no}${hasDrink ? ' · وصل لشاشة الباريستا' : ''}` : `${D.dateArS(o.ts)} · ${D.time(o.ts)}`)}
+    const sts = D.stationsOf(s, o).map((x) => D.STATIONS[x].ar);
+    const m = D.modal(`${D.head(fresh ? bi('Paid', 'تم الدفع') : bi('Invoice ' + o.inv, 'الفاتورة'), fresh ? `طلب #${o.no}${sts.length ? ' · وصل لـ' + sts.join(' و') : ''}` : `${D.dateArS(o.ts)} · ${D.time(o.ts)}`)}
       <div class="modal__b">
         ${fresh ? stepper([['Tender', 'طريقة الدفع'], ['Confirm', 'التأكيد'], ['Receipt', 'الفاتورة']], 3) : ''}
         ${fresh ? `<div class="done-ok">${check()}${o.cash && o.cash.change ? `<span class="muted">Change · الباقي للعميل</span><span class="change">${fmt(o.cash.change)} ر.س</span>` : `<b>${fmt(o.total)} ر.س · ${o.pays.map((p) => D.PAY[p.m].ar).join(' + ')}</b>`}${o.creditBack ? `<span class="muted">فرق الاستبدال للعميل كاش: ${fmt(o.creditBack)} ر.س</span>` : ''}</div>` : ''}
@@ -816,16 +852,16 @@
     const s = S();
     const online = s.orders.filter((o) => o.status === 'new');
     const active = s.orders.filter((o) => o.status === 'prep' || o.status === 'ready').sort((a, b) => b.ts - a.ts);
-    view.innerHTML = `<div class="vh"><div><span class="label">Orders · ${D.dateAr()}</span><h1>Orders</h1><p>طلبات QR والموقع تصل هنا مباشرة، مع كل فواتير اليوم والبحث والمرتجعات.</p></div>
+    view.innerHTML = `<div class="vh"><div><span class="label">Orders · ${D.dateAr()}</span><h1>Orders</h1><p>طلبات الموقع (QR الطاولة) والكشك تصل هنا مباشرة، مع كل فواتير اليوم والبحث والمرتجعات.</p></div>
       <button class="btn btn--danger" id="ofind">${I('refund', 'sm')}${bi('Refund', 'مرتجع أو إلغاء')}</button>
-      <div class="seg" id="ot"><button data-t="online" class="${otab === 'online' ? 'on' : ''}">${bi('Online' + (online.length ? ' · ' + online.length : ''), 'أونلاين')}</button><button data-t="active" class="${otab === 'active' ? 'on' : ''}">${bi('Active · ' + active.length, 'قيد التحضير')}</button><button data-t="all" class="${otab === 'all' ? 'on' : ''}">${bi('All invoices · ' + s.orders.length, 'كل الفواتير')}</button></div></div>
+      <div class="seg" id="ot"><button data-t="online" class="${otab === 'online' ? 'on' : ''}">${bi('Incoming' + (online.length ? ' · ' + online.length : ''), 'الموقع والكشك')}</button><button data-t="active" class="${otab === 'active' ? 'on' : ''}">${bi('Active · ' + active.length, 'قيد التحضير')}</button><button data-t="all" class="${otab === 'all' ? 'on' : ''}">${bi('All invoices · ' + s.orders.length, 'كل الفواتير')}</button></div></div>
       <div id="ob"></div>`;
     $('#ot', view).addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (!b) return; otab = b.dataset.t; renderOrders(view); });
     $('#ofind', view).addEventListener('click', openFindOrder);
     const ob = $('#ob', view);
     if (otab === 'online') {
-      ob.innerHTML = `<div class="set-row card" style="margin-bottom:14px;padding:12px 18px"><span><b>قبول تلقائي لطلبات QR والموقع</b><small>عند الإيقاف، يراجع الكاشير الطلب ويقبله قبل وصوله للباريستا</small></span><button class="switch ${s.settings.autoAccept ? 'on' : ''}" id="aa" aria-label="قبول تلقائي"></button></div>
-        <div class="ord-list">${online.length ? online.map((o) => ocard(o, true)).join('') : `<div class="card empty">${I('qr')}<b style="color:var(--ink-2)">لا توجد طلبات أونلاين بانتظار القبول</b><span>عندما يطلب عميل من QR الطاولة أو من الموقع، سيظهر الطلب هنا مع تنبيه صوتي.</span></div>`}</div>
+      ob.innerHTML = `<div class="set-row card" style="margin-bottom:14px;padding:12px 18px"><span><b>قبول تلقائي لطلبات الموقع</b><small>عند الإيقاف: يراجع الكاشير الطلب ويقبله، ثم ينتقل للباريستا أو المطبخ مباشرة</small></span><button class="switch ${s.settings.autoAccept ? 'on' : ''}" id="aa" aria-label="قبول تلقائي"></button></div>
+        <div class="ord-list">${online.length ? online.map((o) => ocard(o, true)).join('') : `<div class="card empty">${I('qr')}<b style="color:var(--ink-2)">لا توجد طلبات بانتظار موافقتك</b><span>عندما يطلب عميل من QR الطاولة أو من الموقع، أو يختار «الدفع عند الكاشير» في الكشك، سيظهر الطلب هنا مع تنبيه صوتي.</span></div>`}</div>
         <h3 style="margin:22px 0 10px;font-size:14px">آخر الطلبات الأونلاين اليوم</h3>
         <div class="ord-list">${s.orders.filter((o) => o.ch !== 'counter' && o.status !== 'new').slice(-5).reverse().map((o) => ocard(o)).join('')}</div>`;
       $('#aa', ob).addEventListener('click', () => { D.mutate((st) => { st.settings.autoAccept = !st.settings.autoAccept; }, 'set'); renderOrders(view); });
@@ -836,7 +872,7 @@
       const list = D.today(s).filter((o) => !k || (o.inv || '').includes(k) || String(o.no) === k.replace('#', '') || (o.name || '').includes(k) || (o.cust && (s.customers.find((c) => c.id === o.cust) || {}).phone?.includes(k))).slice().reverse();
       ob.innerHTML = `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap"><label class="search" style="flex:1;min-width:220px"><span>${I('search')}</span><input class="input" id="oq" placeholder="رقم الفاتورة INV-… أو رقم الطلب أو اسم العميل" value="${esc(oq)}"></label></div>
         <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الوقت</th><th>الطلب</th><th>الفاتورة</th><th>المصدر</th><th>الأصناف</th><th>الدفع</th><th>الكاشير</th><th class="r">الإجمالي</th><th>الحالة</th></tr></thead>
-        <tbody>${list.slice(0, 120).map((o) => `<tr class="click" data-o="${o.id}"><td class="nw en">${D.time(o.ts)}</td><td class="en"><b>#${o.no}</b></td><td class="mono nw" style="font-size:12px">${o.inv || '—'}</td><td class="nw">${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}</td><td>${o.lines.reduce((a, l) => a + l.qty, 0)}</td><td class="nw">${o.pays.map((p) => `<span class="pill">${D.PAY[p.m].ar}</span>`).join(' ')}</td><td class="nw">${esc(D.staff(o.staff).short)} · ${o.reg}</td><td class="r nw">${money(o.total)}</td><td class="nw">${statusPill(o)}</td></tr>`).join('')}</tbody></table></div>`;
+        <tbody>${list.slice(0, 120).map((o) => `<tr class="click" data-o="${o.id}"><td class="nw en">${D.time(o.ts)}</td><td class="en"><b>#${o.no}</b></td><td class="mono nw" style="font-size:12px">${o.inv || '—'}</td><td class="nw">${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}</td><td>${o.lines.reduce((a, l) => a + l.qty, 0)}</td><td class="nw">${o.pays.map((p) => `<span class="pill">${D.PAY[p.m].ar}</span>`).join(' ')}</td><td class="nw">${esc(D.who(o).short)}${o.ch === 'kiosk' && !o.staff ? '' : ' · ' + o.reg}</td><td class="r nw">${money(o.total)}</td><td class="nw">${statusPill(o)}</td></tr>`).join('')}</tbody></table></div>`;
       const oi = $('#oq', ob);
       oi.addEventListener('input', () => { oq = oi.value; const pos = oi.selectionStart; renderOrders(view); const n = $('#oq', view); n.focus(); n.setSelectionRange(pos, pos); });
     }
@@ -844,8 +880,9 @@
       const a = e.target.closest('[data-act]');
       if (a) {
         const id = a.dataset.id;
-        if (a.dataset.act === 'accept') { D.setStatus(id, 'prep'); D.toast('تم قبول الطلب', 'وصل لشاشة الباريستا', { ic: 'cup' }); }
+        if (a.dataset.act === 'accept') acceptOrder(id);
         if (a.dataset.act === 'reject') rejectOnline(id);
+        if (a.dataset.act === 'kcancel') cancelKiosk(id);
         if (a.dataset.act === 'collect') openPay(S().orders.find((x) => x.id === id));
         if (a.dataset.act === 'ready') { D.setStatus(id, 'ready'); D.sound('ready'); }
         if (a.dataset.act === 'done') D.setStatus(id, 'done');
@@ -856,7 +893,8 @@
     });
   }
   function statusPill(o) {
-    if (o.status === 'rejected') return '<span class="pill pill--red">Rejected · مرفوض</span>';
+    if (o.status === 'rejected') return `<span class="pill pill--red">${o.payFirst ? 'Cancelled · ملغي' : 'Rejected · مرفوض'}</span>`;
+    if (o.status === 'new' && o.payFirst) return '<span class="pill pill--amber"><i class="dot pulse"></i>Pay at counter · يدفع عند الكاشير</span>';
     if (o.cancelled || o.status === 'cancelled') return '<span class="pill pill--red">Cancelled · ملغي</span>';
     if (o.unpaid && o.status !== 'new') return '<span class="pill pill--amber">Unpaid · بانتظار الدفع</span>';
     if (o.refunded) return '<span class="pill pill--red">Partial refund · مرتجع جزئي</span>';
@@ -864,8 +902,9 @@
   }
   function ocard(o, isNew) {
     const items = o.lines.map((l) => `${l.qty}× ${D.prod(l.pid).ar}`).join('، ');
-    const collect = o.unpaid && o.status !== 'new' && o.status !== 'rejected' && !o.cancelled ? `<button class="btn btn--go btn--sm" data-act="collect" data-id="${o.id}">${I('cash', 'sm')}${bi('Collect ' + fmt(o.total), 'تحصيل')}</button>` : '';
-    const acts = isNew ? `<button class="btn btn--ghost btn--sm" data-act="reject" data-id="${o.id}">${bi('Reject', 'رفض')}</button><button class="btn btn--go btn--sm" data-act="accept" data-id="${o.id}">${I('check', 'sm')}${bi('Accept', 'اقبل وأرسل للباريستا')}</button>`
+    const collect = o.unpaid && !o.payFirst && o.status !== 'new' && o.status !== 'rejected' && !o.cancelled ? `<button class="btn btn--go btn--sm" data-act="collect" data-id="${o.id}">${I('cash', 'sm')}${bi('Collect ' + fmt(o.total), 'تحصيل')}</button>` : '';
+    const acts = isNew && o.payFirst ? `<button class="btn btn--ghost btn--sm" data-act="kcancel" data-id="${o.id}">${bi('Cancel', 'إلغاء')}</button><button class="btn btn--go btn--sm" data-act="collect" data-id="${o.id}">${I('cash', 'sm')}${bi('Collect ' + fmt(o.total), 'تحصيل وإرسال للتحضير')}</button>`
+      : isNew ? `<button class="btn btn--ghost btn--sm" data-act="reject" data-id="${o.id}">${bi('Reject', 'رفض')}</button><button class="btn btn--go btn--sm" data-act="accept" data-id="${o.id}">${I('check', 'sm')}${bi('Accept', 'اقبل وأرسل للتحضير')}</button>`
       : o.status === 'prep' ? `<button class="btn btn--ghost btn--sm" data-act="ready" data-id="${o.id}">${bi('Ready', 'جاهز')}</button>` : o.status === 'ready' ? `<button class="btn btn--ghost btn--sm" data-act="done" data-id="${o.id}">${bi('Picked up', 'تم التسليم')}</button>` : `<button class="btn btn--soft btn--sm" data-o="${o.id}">${bi('Details', 'التفاصيل')}</button>`;
     const first = !shownCards.has(o.id); shownCards.add(o.id);
     return `<div class="ocard${isNew ? ' new' : ''}${first && booted ? ' in' : ''}" ${isNew ? '' : `data-o="${o.id}"`} style="${isNew ? '' : 'cursor:pointer'}">
@@ -873,6 +912,18 @@
       <div class="ocard__b"><b>${esc(o.name || 'عميل')} · ${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}</b><p>${esc(items)}</p>
         <div class="ocard__meta">${statusPill(o)}<span class="pill pill--blue">${o.unpaid ? 'الدفع عند الكاشير' : o.pays.map((p) => D.PAY[p.m].ar).join(' + ')}</span><span class="pill">${money(o.total)}</span>${isNew ? `<span class="pill">${D.ago(o.ts)}</span>` : ''}</div></div>
       <div class="ocard__act">${collect}${acts}</div></div>`;
+  }
+  // قبول طلب الموقع: يروح لشاشة الباريستا أو المطبخ (أو الاتنين) حسب الأصناف
+  function acceptOrder(id) {
+    D.setStatus(id, 'prep');
+    const s = S(); const o = s.orders.find((x) => x.id === id); if (!o) return;
+    const sts = D.stationsOf(s, o).map((x) => D.STATIONS[x].ar);
+    D.toast(`تم قبول الطلب #${o.no}`, sts.length ? 'وصل لـ' + sts.join(' و') : 'لا توجد أصناف تحتاج تحضير', { ic: 'cup' });
+  }
+  function cancelKiosk(id) {
+    const o = S().orders.find((x) => x.id === id); if (!o) return;
+    const m = D.modal(`${D.head(bi('Cancel kiosk order', 'إلغاء طلب الكشك'), `طلب #${o.no} — العميل لم يدفع، فلا يوجد مبلغ للاسترجاع`)}<div class="modal__f"><button class="btn btn--ghost" data-close>${bi('Back', 'رجوع')}</button><button class="btn btn--danger" id="ok">${bi('Cancel order', 'إلغاء الطلب')}</button></div>`, { cls: 'modal--sm' });
+    $('#ok', m).addEventListener('click', () => { D.setStatus(id, 'rejected'); D.mutate(() => D.log(me, 'void', `إلغاء طلب كشك غير مدفوع #${o.no} — ${fmt(o.total)} ر.س`, null, 'warn'), 'reject'); m.close(); D.toast('تم إلغاء الطلب', `#${o.no}`, { ic: 'x' }); });
   }
   function rejectOnline(id) {
     const m = D.modal(`${D.head(bi('Reject order', 'رفض الطلب'), 'يُعاد المبلغ للعميل أونلاين تلقائيًا، ويصله إشعار بذلك')}
@@ -886,7 +937,7 @@
     const s = S(); const o = s.orders.find((x) => x.id === id); if (!o) return;
     const step = (label, ts, on) => `<div class="${on ? '' : 'off'}"><span>${label}</span><small>${ts ? D.time(ts) : '—'}</small></div>`;
     const cu = o.cust ? s.customers.find((c) => c.id === o.cust) : null;
-    const m = D.modal(`${D.head(bi('Invoice ' + o.inv, 'فاتورة · طلب #' + o.no), `${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''} · ${esc(D.staff(o.staff).name)} · كاشير ${o.reg}${cu ? ' · ' + esc(cu.name) : ''}`)}
+    const m = D.modal(`${D.head(bi('Invoice ' + o.inv, 'فاتورة · طلب #' + o.no), `${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''} · ${esc(D.who(o).name)}${o.ch === 'kiosk' && !o.staff ? '' : ' · كاشير ' + o.reg}${cu ? ' · ' + esc(cu.name) : ''}`)}
       <div class="modal__b"><div class="grid g2" style="align-items:start">
         <div class="grid" style="gap:12px">
           ${D.canRefund(o) ? `<button class="btn btn--danger btn--lg btn--block" id="rf">${I('refund')}${bi('Refund / Cancel', 'صنف واحد أو الطلب كله')}</button>` : `<div class="blind">${statusPill(o)} <span>${o.status === 'new' ? 'الطلب لم يُقبل بعد — اقبله أو ارفضه من تبويب Online' : 'لا يوجد ما يمكن إرجاعه من هذا الطلب'}</span></div>`}
@@ -1035,13 +1086,17 @@
   /* =====================================================================
      BARISTA (inside the app)
      ===================================================================== */
-  let kdsLang = 'en';
+  let kdsLang = 'en', kdsSt = 'all';
   function renderKDS(view) {
     view.className = 'view--full';
-    view.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 0;flex-wrap:wrap"><div><span class="label">Barista · KDS</span><div class="h-en" style="font-size:28px">Barista</div></div>
-      <div style="display:flex;gap:8px"><div class="seg" id="kl"><button data-l="ar" class="${kdsLang === 'ar' ? 'on' : ''}">ع</button><button data-l="en" class="${kdsLang === 'en' ? 'on' : ''}">EN</button></div><a class="btn btn--ghost btn--sm" href="kds.html" target="_blank">${I('kds', 'sm')} افتحها على شاشة مستقلة</a></div></div><div id="kdsm"></div>`;
-    const k = window.DARJ_KDS.mount($('#kdsm', view), { lang: kdsLang, sound: false });
+    const title = { all: ['Stations', 'الباريستا والمطبخ معًا'], bar: ['Barista', 'المشروبات'], kitchen: ['Kitchen', 'الطعام والحلا'] };
+    const page = kdsSt === 'all' ? 'kds.html?st=bar' : 'kds.html?st=' + kdsSt;
+    view.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 0;flex-wrap:wrap"><div><span class="label">Stations · KDS</span><div class="h-en" style="font-size:28px" id="kT">${title[kdsSt][0]}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="kst">${[['all', 'All', 'الكل', 'kds'], ['bar', 'Barista', 'الباريستا', 'cup'], ['kitchen', 'Kitchen', 'المطبخ', 'flame']].map(([k, en, ar, ic]) => `<button data-st="${k}" class="${kdsSt === k ? 'on' : ''}" title="${ar}">${I(ic, 'sm')} ${en}</button>`).join('')}</div>
+      <div class="seg" id="kl"><button data-l="ar" class="${kdsLang === 'ar' ? 'on' : ''}">ع</button><button data-l="en" class="${kdsLang === 'en' ? 'on' : ''}">EN</button></div><a class="btn btn--ghost btn--sm" id="kOpen" href="${page}" target="_blank">${I('kds', 'sm')} شاشة مستقلة</a></div></div><div id="kdsm"></div>`;
+    const k = window.DARJ_KDS.mount($('#kdsm', view), { lang: kdsLang, sound: false, st: kdsSt });
     $('#kl', view).addEventListener('click', (e) => { const b = e.target.closest('[data-l]'); if (!b) return; kdsLang = b.dataset.l; $$('#kl button', view).forEach((x) => x.classList.toggle('on', x === b)); k.setLang(kdsLang); });
+    $('#kst', view).addEventListener('click', (e) => { const b = e.target.closest('[data-st]'); if (!b) return; kdsSt = b.dataset.st; $$('#kst button', view).forEach((x) => x.classList.toggle('on', x === b)); k.setSt(kdsSt); $('#kT', view).textContent = title[kdsSt][0]; $('#kOpen', view).href = kdsSt === 'all' ? 'kds.html?st=bar' : 'kds.html?st=' + kdsSt; });
     return () => k.destroy();
   }
 
@@ -1600,11 +1655,12 @@
           <div class="set-row"><span><b>كارت الولاء</b><small>عدد المشروبات مقابل مشروب هدية</small></span><div class="seg" id="ln">${[5, 6, 8, 10].map((n) => `<button data-n="${n}" class="${s.settings.loyalNeed === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>حد خصم الكاشير</b><small>ما يزيد عن ذلك يحتاج موافقة المشرف</small></span><span class="pill">10%</span></div></div>
         <div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
-          ${[['print', 'طابعة الفواتير', 'أي طابعة حرارية 80مم معرّفة على الجهاز — الطباعة من نافذة الطباعة', 'test-print'], ['drawer', 'درج الكاش', 'يفتح مع الطابعة (إعداد «فتح الدرج» في تعريف الطابعة)', ''], ['card', 'جهاز الشبكة (مدى)', 'جهاز منفصل — المبلغ يُكتب على الجهاز', ''], ['scan', 'قارئ الباركود', 'يعمل مباشرة كلوحة مفاتيح', ''], ['user', 'شاشة العميل', 'شاشة ثانية على نفس الجهاز', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span>${a ? `<button class="btn btn--soft btn--sm" data-test="${a}">${a === 'test-print' ? 'اطبع تجربة' : 'افتح'}</button>` : ''}</div>`).join('')}</div>
+          ${[['print', 'طابعة الفواتير', 'أي طابعة حرارية 80مم معرّفة على الجهاز — الطباعة من نافذة الطباعة', 'test-print'], ['drawer', 'درج الكاش', 'يفتح مع الطابعة (إعداد «فتح الدرج» في تعريف الطابعة)', ''], ['card', 'جهاز الشبكة (مدى)', 'جهاز منفصل — المبلغ يُكتب على الجهاز', ''], ['scan', 'قارئ الباركود', 'يعمل مباشرة كلوحة مفاتيح', ''], ['user', 'شاشة العميل', 'شاشة ثانية على نفس الجهاز أو تابلت مربوط (Devices)', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span>${a ? `<button class="btn btn--soft btn--sm" data-test="${a}">${a === 'test-print' ? 'اطبع تجربة' : 'افتح'}</button>` : ''}</div>`).join('')}</div>
         <div class="card"><div class="card__h"><h3><span class="label">Data</span>البيانات</h3></div>
           <div class="set-row"><span><b>نسخة احتياطية</b><small>ملف فيه الإعدادات والموظفين والعملاء والمخزون وكل الأيام المؤرشفة (${days} يوم)</small></span><button class="btn btn--ghost btn--sm" id="backup">${I('download', 'sm')}${bi('Download', 'تنزيل')}</button></div>
           <div class="set-row"><span><b>وضع التدريب</b><small>نسخة منفصلة بطلبات تجريبية وجولات تفاعلية — لا تلمس أرقام المحل</small></span><button class="btn btn--ghost btn--sm" id="train">${I('play', 'sm')}${bi('Open', 'افتح')}</button></div>
           <div class="set-row"><span><b>مسح كل البيانات</b><small>يرجع النظام لأول تشغيل — للمدير فقط</small></span><button class="btn btn--danger btn--sm" id="wipe">${bi('Reset', 'مسح')}</button></div></div>
+        ${prepCards()}
       </div>
       <p class="muted" style="font-size:12px;margin-top:18px;text-align:center"><a href="https://a7madshiref001-ctrl.github.io/athr/" target="_blank" rel="noopener" lang="en">Built by ATHR</a></p>`;
     $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); renderSettingsLive(view); }));
@@ -1614,6 +1670,7 @@
     $('#train', view).addEventListener('click', () => D.setTraining(true));
     $('#wipe', view).addEventListener('click', wipeAll);
     if ($('#connect', view)) $('#connect', view).addEventListener('click', () => { if (window.DARJ_CONNECT) window.DARJ_CONNECT.open(me); });
+    wirePrep(view, () => renderSettingsLive(view));
     $$('[data-test]', view).forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.test === 'test-print') { const o = D.today(S()).filter((x) => x.inv).slice(-1)[0]; if (o) D.print(D.receiptHTML(o, { copy: 1 })); else D.toast('لا توجد فواتير بعد', 'اطبع بعد أول عملية بيع', { warn: 1 }); }
       if (b.dataset.test === 'test-screen') window.open('screen.html?mode=cart', '_blank');
@@ -1686,10 +1743,12 @@
           <div class="set-row"><span><b>جرّب انقطاع الإنترنت</b><small>البيع يستمر بدون اتصال ويتزامن عند عودته</small></span><button class="btn btn--ghost btn--sm" id="off">${I(s.settings.offline ? 'wifi' : 'wifioff', 'sm')} ${s.settings.offline ? 'أعِد الاتصال' : 'اقطع الاتصال'}</button></div>
           <div class="set-row"><span><b>ابدأ يوم جديد</b><small>يعيد البيانات لحالتها الأولى (طلبات اليوم من الصباح حتى الآن)</small></span><button class="btn btn--danger btn--sm" id="reset">إعادة ضبط</button></div>
           <p class="muted" style="font-size:12px;margin-top:8px">كل الأسماء والأرقام والطلبات هنا وهمية، ولا تخرج أي بيانات من الجهاز.</p></div>
+        ${prepCards()}
       </div>`;
     $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); renderSettings(view); }));
     $('#ln', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; }, 'set'); renderSettings(view); });
     $('#off', view).addEventListener('click', toggleNet);
+    wirePrep(view, () => renderSettings(view));
     $('#reset', view).addEventListener('click', () => { D.reset(); clearCart(); D.toast('بدأ يوم جديد', 'عادت البيانات لحالتها الأولى', { ic: 'sync' }); render(); });
     $$('[data-test]', view).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.test;
@@ -1700,6 +1759,106 @@
       if (t === 'test-kds') D.toast('طُبعت تذكرة اختبار', 'على طابعة البار', { ic: 'print' });
       if (t === 'test-screen') window.open('screen.html?mode=cart', '_blank');
     }));
+  }
+
+
+  /* =====================================================================
+     STATIONS · KIOSK · DEVICES — توجيه الأصناف، والكشك، وربط الشاشات (جوه الإعدادات)
+     ===================================================================== */
+  const LNK = () => window.DARJ_LINK || { ok: false, peers: [], status: 'off', on: () => () => {} };
+  const SCREENS = [
+    { id: 'bar', page: 'kds.html?st=bar', ic: 'cup', en: 'Barista screen', ar: 'شاشة الباريستا', sub: 'المشروبات فقط — تابلت بجانب المكينة', role: 'kds', st: 'bar' },
+    { id: 'kitchen', page: 'kds.html?st=kitchen', ic: 'flame', en: 'Kitchen screen', ar: 'شاشة المطبخ', sub: 'الطعام والحلا فقط — تابلت داخل المطبخ', role: 'kds', st: 'kitchen' },
+    { id: 'board', page: 'screen.html', ic: 'tv', en: 'Order status board', ar: 'شاشة حالة الطلبات', sub: 'للعملاء: في الانتظار · قيد التحضير · جاهز', role: 'board' },
+    { id: 'cart', page: 'screen.html?mode=cart', ic: 'user', en: 'Customer display', ar: 'شاشة العميل عند الكاشير', sub: 'الطلب والإجمالي وقت الدفع', role: 'cart' },
+    { id: 'kiosk', page: 'kiosk.html', ic: 'kiosk', en: 'Self-order kiosk', ar: 'كشك الطلب والدفع الذاتي', sub: 'آيباد في المحل — العميل يطلب ويدفع بنفسه', role: 'kiosk' },
+  ];
+  const peersOf = (sc) => LNK().peers.filter((p) => p.role === sc.role && (!sc.st || p.st === sc.st));
+  function routeSeg(cur, attr, def) {
+    return `<div class="seg rt-seg">${def ? `<button data-${attr}="" class="${!cur ? 'on' : ''}" title="مثل القسم">${I('link', 'sm')}<span>Section</span></button>` : ''}${Object.entries(D.ROUTE).map(([k, r]) => `<button data-${attr}="${k}" class="${cur === k ? 'on' : ''}" title="${r.ar}">${I(r.ic, 'sm')}<span>${r.en}</span></button>`).join('')}</div>`;
+  }
+  let rtOpen = '';
+  function routesCard() {
+    const s = S(); const R = s.routes || {};
+    const n = { bar: 0, kitchen: 0, both: 0, none: 0 };
+    D.PRODUCTS.forEach((p) => { n[D.routeOf(s, p)]++; });
+    const cats = D.CATS.filter((c) => D.PRODUCTS.some((p) => p.cat === c.id));
+    return `<div class="card card--wide" id="rtCard"><div class="card__h"><h3><span class="label">Stations · Routing</span>أين يُحضَّر كل صنف؟</h3><span class="pill">${n.bar + n.both} للباريستا · ${n.kitchen + n.both} للمطبخ</span></div>
+      <div class="rt-hero">
+        <div class="rt-hero__o">${I('orders')}${bi('Order', 'طلب واحد')}<small>2× سبانش لاتيه · 1× كوكيز</small></div>
+        <svg class="rt-hero__arr" viewBox="0 0 120 80" aria-hidden="true"><path d="M8 40 C46 40 52 14 104 14"/><path d="M8 40 C46 40 52 66 104 66"/><path d="M96 8l9 6-9 6M96 60l9 6-9 6"/></svg>
+        <div class="rt-hero__s"><div>${I('cup')}<span>${bi('Barista', 'الباريستا')}<small>2× سبانش لاتيه</small></span></div><div>${I('flame')}<span>${bi('Kitchen', 'المطبخ')}<small>1× كوكيز</small></span></div></div>
+        <p>الطلب ينقسم تلقائيًا: كل شاشة ترى نصيبها فقط، وتحته سطر صغير بنصيب الشاشة الأخرى. ويظهر الطلب للعميل <b>«جاهز»</b> عندما تنتهي الشاشتان. اختر لكل قسم مكان تحضيره، وإذا كان صنف معيّن مختلفًا افتح القسم وغيّره وحده.</p>
+      </div>
+      <div class="rt-list">${cats.map((c) => {
+        const items = D.PRODUCTS.filter((p) => p.cat === c.id);
+        const cur = (R.cats && R.cats[c.id]) || D.catDefRoute(c.id);
+        const own = items.filter((p) => R.items && R.items[p.id]).length;
+        const mixed = new Set(items.map((p) => D.routeOf(s, p))).size > 1;
+        return `<div class="rt-row${rtOpen === c.id ? ' open' : ''}"><button class="rt-cat" data-rto="${c.id}">${I(c.ic || 'cup')}${bi(esc(c.en), `${esc(c.ar)} · ${items.length} صنف${own ? ` · ${own} مختلف` : mixed ? ' · مختلط' : ''}`)}${I('chev', 'sm rt-chev')}</button><div data-rtcat="${c.id}">${routeSeg(cur, 'rc')}</div></div>
+          ${rtOpen === c.id ? `<div class="rt-items">${items.map((p) => `<div class="rt-item"><span class="thumb" ${D.img(p) ? `style="background-image:url('${D.img(p)}')"` : ''}></span><span class="rt-item__n"><b>${esc(p.ar)}</b><small>${esc(p.en)}${R.items && R.items[p.id] ? '' : ` · مثل القسم (${D.ROUTE[D.routeOf(s, p)].ar})`}</small></span><div data-rtitem="${p.id}">${routeSeg(R.items && R.items[p.id], 'ri', true)}</div></div>`).join('')}</div>` : ''}`;
+      }).join('')}</div></div>`;
+  }
+  function kioskCard() {
+    const s = S(); const k = D.kioskCfg(s); const card = D.kioskCard();
+    const sw = (key, on) => `<button class="switch ${on ? 'on' : ''}" data-ksw="${key}"></button>`;
+    return `<div class="card"><div class="card__h"><h3><span class="label">Kiosk · Self-order</span>الكشك — طلب ودفع ذاتي</h3><span class="pill ${k.on ? 'pill--go' : ''}">${k.on ? 'يعمل' : 'متوقف'}</span></div>
+      <div class="set-row"><span><b>تشغيل الكشك</b><small>الآيباد في المحل يعرض المنيو، والعميل يطلب دون الرجوع للكاشير</small></span>${sw('on', k.on)}</div>
+      <div class="set-row"><span><b>الدفع بالبطاقة على الكشك</b><small>${card ? (D.REAL ? 'مربوط بشركة الدفع' : 'في التدريب الدفع محاكاة — والطلب ينتقل للتحضير فور الدفع') : 'يتفعّل بعد الربط مع شركة دفع (جهاز مدى أو بوابة دفع). حتى ذلك الحين: الدفع عند الكاشير'}</small></span>${card ? sw('card', k.card) : '<span class="pill pill--amber">بعد الربط</span>'}</div>
+      <div class="set-row"><span><b>الدفع عند الكاشير</b><small>الطلب يصل هنا في Orders، وبعد التحصيل ينتقل للتحضير تلقائيًا</small></span>${sw('counter', k.counter)}</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a class="btn btn--ghost btn--sm" href="kiosk.html" target="_blank">${I('kiosk', 'sm')}${bi('Open kiosk', 'افتح الكشك هنا')}</a>${LNK().ok ? `<button class="btn btn--ink btn--sm" data-pair="kiosk">${I('qr', 'sm')}${bi('Pair an iPad', 'اربط آيباد')}</button>` : ''}</div></div>`;
+  }
+  function devicesCard() {
+    const L = LNK();
+    const stTxt = !L.ok ? ['', 'على نفس الجهاز فقط'] : L.status === 'on' ? ['go', 'Live · الربط يعمل'] : L.status === 'err' ? ['red', 'لا يوجد اتصال'] : ['amber', 'جارٍ الاتصال…'];
+    return `<div class="card card--wide" id="devCard"><div class="card__h"><h3><span class="label">Devices · Link</span>الشاشات والأجهزة المربوطة</h3><span class="pill${stTxt[0] ? ' pill--' + stTxt[0] : ''}" id="lnkSt">${L.status === 'on' ? '<i class="dot pulse"></i>' : ''}${stTxt[1]}</span></div>
+      <div class="blind" style="margin-bottom:12px">${I('link', 'sm')}<span>${L.ok ? 'كل شاشة تُربط مرة واحدة: اضغط <b>Pair</b> وامسح الكود من الجهاز الآخر (آيباد أو تابلت أو شاشة). بعدها يصلها كل طلب لحظة بلحظة، ما دام الكاشير مفتوحًا والإنترنت متصلًا.' : 'الشاشات تعمل كتبويبات على نفس جهاز الكاشير. الربط بين أجهزة مختلفة يتفعّل مع إعداد الربط (connect).'}</span></div>
+      <div class="devs">${SCREENS.map((sc) => { const on = peersOf(sc).length; return `<div class="devx${on ? ' on' : ''}"><span class="dev__i">${I(sc.ic)}</span><span class="devx__b">${bi(sc.en, sc.ar)}<small>${sc.sub}</small><span class="devx__st">${on ? `<i class="dot pulse"></i> ${on === 1 ? 'جهاز واحد متصل' : on + ' أجهزة متصلة'}` : L.ok ? 'غير متصلة' : ''}</span></span><span class="devx__a"><a class="btn btn--ghost btn--sm" href="${sc.page}" target="_blank">${bi('Open', 'هنا')}</a>${L.ok ? `<button class="btn btn--ink btn--sm" data-pair="${sc.id}">${I('qr', 'sm')}${bi('Pair', 'ربط جهاز')}</button>` : ''}</span></div>`; }).join('')}</div>
+      ${L.ok ? `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap"><small class="muted">إذا ضاع جهاز أو تغيّر: «إلغاء ربط الكل» يغيّر المفتاح، وتحتاج كل الشاشات إلى ربط من جديد.</small><button class="btn btn--danger btn--sm" id="lnkRot">${bi('Unlink all', 'إلغاء ربط الكل')}</button></div>` : ''}</div>`;
+  }
+  function pairModal(id) {
+    const sc = SCREENS.find((x) => x.id === id); const L = LNK();
+    if (!L.ok || !L.secret || !L.secret()) { D.toast('الربط غير جاهز', 'انتظر ثوانٍ حتى يتصل الكاشير', { warn: 1 }); return; }
+    const url = L.pairUrl(sc.page);
+    const m = D.modal(`${D.head(bi('Pair · ' + sc.en, sc.ar), 'امسح الكود من الجهاز الذي سيصبح هذه الشاشة')}
+      <div class="modal__b"><div class="pairq"><div class="pairq__qr">${D.qrSVG(url)}</div>
+        <ol class="pairq__steps"><li><b>افتح الكاميرا</b> على الآيباد أو التابلت، وامسح الكود.</li><li><b>ستفتح الشاشة وتُربط تلقائيًا</b> — وتبقى مربوطة حتى لو أُغلقت.</li><li><b>من Safari:</b> مشاركة ← «إضافة إلى الشاشة الرئيسية» لتفتح بملء الشاشة.</li></ol></div>
+        <div class="blind" style="margin-top:12px">${I('lock', 'sm')}<span>هذا الكود يحتوي على مفتاح المحل — لا ترسله لأحد خارج المحل.</span></div></div>
+      <div class="modal__f"><button class="btn btn--ghost" id="cp">${I('link', 'sm')}${bi('Copy link', 'انسخ الرابط')}</button><button class="btn btn--ink" data-close>${bi('Done', 'تم')}</button></div>`, { cls: 'modal--sm' });
+    $('#cp', m).addEventListener('click', () => { try { navigator.clipboard.writeText(url); D.toast('تم نسخ الرابط', 'افتحه على الجهاز الآخر', { ic: 'link' }); } catch (e) { /* */ } });
+    const before = peersOf(sc).map((p) => p.dev);
+    const off = L.on(() => { if (!m.isConnected) { off(); return; } if (peersOf(sc).some((p) => !before.includes(p.dev))) { off(); D.sound('ok'); D.toast(`تم ربط ${sc.ar}`, 'ستصلها الطلبات لحظة بلحظة', { ic: 'link' }); m.close(); } });
+  }
+  const prepCards = () => routesCard() + kioskCard() + devicesCard();
+  function wireDevices(root) {
+    root.querySelectorAll('#devCard [data-pair], [data-pair="kiosk"]').forEach((b) => { if (b._w) return; b._w = 1; b.addEventListener('click', () => pairModal(b.dataset.pair)); });
+    const rot = root.querySelector('#lnkRot');
+    if (rot && !rot._w) { rot._w = 1; rot.addEventListener('click', async () => { const u = await D.approve('settings', 'إلغاء ربط كل الشاشات', me); if (!u) return; LNK().rotate(); D.toast('تم إلغاء ربط كل الشاشات', 'اربط كل شاشة من جديد عبر Pair', { ic: 'link' }); }); }
+  }
+  function wirePrep(view, again) {
+    view.querySelectorAll('[data-rto]').forEach((b) => b.addEventListener('click', () => { rtOpen = rtOpen === b.dataset.rto ? '' : b.dataset.rto; again(); }));
+    view.querySelectorAll('[data-rtcat] [data-rc]').forEach((b) => b.addEventListener('click', () => {
+      const cat = b.closest('[data-rtcat]').dataset.rtcat; const r = b.dataset.rc;
+      D.mutate((st) => { st.routes = st.routes || {}; st.routes.cats = Object.assign({}, st.routes.cats, { [cat]: r }); D.log(me, 'settings', `توجيه قسم «${(D.CATS.find((c) => c.id === cat) || {}).ar}» ← ${D.ROUTE[r].ar}`); }, 'set');
+      again();
+    }));
+    view.querySelectorAll('[data-rtitem] [data-ri]').forEach((b) => b.addEventListener('click', () => {
+      const pid = b.closest('[data-rtitem]').dataset.rtitem; const r = b.dataset.ri;
+      D.mutate((st) => { st.routes = st.routes || {}; st.routes.items = Object.assign({}, st.routes.items); if (r) st.routes.items[pid] = r; else delete st.routes.items[pid]; D.log(me, 'settings', `توجيه صنف «${D.prod(pid).ar}» ← ${r ? D.ROUTE[r].ar : 'مثل القسم'}`); }, 'set');
+      again();
+    }));
+    view.querySelectorAll('[data-ksw]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.ksw;
+      D.mutate((st) => { const cur = D.kioskCfg(st); cur[k] = !cur[k]; if (k !== 'on' && !cur.card && !cur.counter) cur[k === 'card' ? 'counter' : 'card'] = true; st.settings.kiosk = cur; D.log(me, 'settings', `الكشك: ${k} — ${cur[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set');
+      again();
+    }));
+    wireDevices(view);
+    // حالة الأجهزة بتتحدّث لوحدها من غير ما الصفحة تتعاد
+    const L = LNK(); if (!L.on) return;
+    const off = L.on(() => {
+      const c = view.querySelector('#devCard'); if (!c || !c.isConnected) { off(); return; }
+      const tmp = document.createElement('div'); tmp.innerHTML = devicesCard(); c.replaceWith(tmp.firstElementChild); wireDevices(view);
+    });
   }
 
   /* =====================================================================

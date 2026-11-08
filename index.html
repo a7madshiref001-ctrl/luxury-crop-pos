@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#F4F0E8">
 <title>محصول فاخر · نظام الكاشير</title>
 <link rel="icon" href="assets/brand/logo-mark.png" type="image/png">
-<link rel="stylesheet" href="assets/darj.css?v=1">
-<link rel="stylesheet" href="assets/brand.css?v=1">
+<link rel="stylesheet" href="assets/darj.css?v=2">
+<link rel="stylesheet" href="assets/brand.css?v=2">
 <style>
   body{min-height:100dvh;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right)) 24px max(16px,env(safe-area-inset-left))}
   .hub{width:min(560px,100%);display:grid;gap:18px}
@@ -26,21 +26,25 @@
   .main-go .dev__i{background:rgba(255,255,255,.1);color:#fff}
   .main-go .ico:last-child{color:rgba(255,255,255,.6)}
   .foot{text-align:center;color:var(--muted);font-size:12px;margin-top:8px}
+  .tip{text-align:center;color:var(--ink-2);font-size:13px;line-height:1.7}
   .foot a{font-family:var(--f-en)}
 </style>
 </head>
 <body>
 <div class="hub">
   <div class="hub__h"><img src="assets/brand/logo-mark.png" alt=""><b>LUXURY CROP</b><p>نظام الكاشير · محصول فاخر</p></div>
-  <a class="go main-go" href="app.html" data-i="register" data-en="Cashier" data-ar="الكاشير — البيع والوردية والتقارير"></a>
-  <a class="go" href="kds.html" data-i="cup" data-en="Barista" data-ar="شاشة التحضير للبار"></a>
-  <a class="go" href="screen.html" data-i="kds" data-en="Order board" data-ar="شاشة «طلبك جاهز» للعملاء"></a>
-  <a class="go" href="screen.html?mode=cart" data-i="user" data-en="Customer display" data-ar="شاشة العميل عند الكاشير"></a>
+  <a class="go main-go" href="app.html" data-i="register" data-en="Cashier" data-ar="الكاشير — البيع وطلبات الموقع والوردية والتقارير"></a>
+  <a class="go" href="kds.html?st=bar" data-i="cup" data-en="Barista" data-ar="شاشة الباريستا — المشروبات"></a>
+  <a class="go" href="kds.html?st=kitchen" data-i="flame" data-en="Kitchen" data-ar="شاشة المطبخ — الطعام والحلا"></a>
+  <a class="go" href="screen.html" data-i="tv" data-en="Order status" data-ar="شاشة العملاء — في الانتظار · قيد التحضير · جاهز"></a>
+  <a class="go" href="screen.html?mode=cart" data-i="user" data-en="Customer display" data-ar="شاشة العميل عند الكاشير وقت الدفع"></a>
+  <a class="go" href="kiosk.html" data-i="kiosk" data-en="Self-order kiosk" data-ar="كشك الطلب والدفع الذاتي — آيباد في المكان"></a>
+  <p class="tip">كل شاشة تُربط بالكاشير مرة واحدة من <b>Settings ← Devices</b> (QR)، وبعدها تصلها الطلبات لحظة بلحظة.</p>
   <p class="foot"><a href="https://a7madshiref001-ctrl.github.io/athr/" target="_blank" rel="noopener" lang="en">Built by ATHR</a></p>
 </div>
-<script src="assets/config.js?v=1"></script>
-<script src="assets/menu.js?v=1"></script>
-<script src="assets/darj.js?v=1"></script>
+<script src="assets/config.js?v=2"></script>
+<script src="assets/menu.js?v=2"></script>
+<script src="assets/darj.js?v=2"></script>
 <script>
 document.querySelectorAll('.go').forEach(function (a) {
   a.innerHTML = '<span class="dev__i">' + DARJ.icon(a.dataset.i) + '</span><span class="bi"><b>' + a.dataset.en + '</b><small>' + a.dataset.ar + '</small></span>' + DARJ.icon('chev');

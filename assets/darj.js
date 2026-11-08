@@ -232,8 +232,60 @@
     counter: { ar: 'الكاشير', en: 'Counter', ic: 'register' },
     table: { ar: 'QR الطاولة', en: 'Table QR', ic: 'qr' },
     pickup: { ar: 'استلام من الموقع', en: 'Web pickup', ic: 'bag' },
+    kiosk: { ar: 'الكشك', en: 'Kiosk', ic: 'kiosk' },
   };
   D.TYPES = { takeaway: { ar: 'سفري', en: 'Takeaway' }, dinein: { ar: 'محلي', en: 'Dine-in' }, table: { ar: 'طاولة', en: 'Table' } };
+  D.who = (o) => (o.ch === 'kiosk' && !o.staff ? { short: 'Kiosk', name: 'الكشك · دفع ذاتي' } : D.staff(o.staff));
+
+  /* ---------- stations: كل صنف بيروح لمكان تحضيره لوحده (الباريستا أو المطبخ) ---------- */
+  D.STATIONS = {
+    bar: { en: 'Barista', ar: 'الباريستا', ic: 'cup' },
+    kitchen: { en: 'Kitchen', ar: 'المطبخ', ic: 'flame' },
+  };
+  D.ROUTE = {
+    bar: { en: 'Barista', ar: 'الباريستا', ic: 'cup' },
+    kitchen: { en: 'Kitchen', ar: 'المطبخ', ic: 'flame' },
+    both: { en: 'Both', ar: 'الاثنين', ic: 'swap' },
+    none: { en: 'No prep', ar: 'بدون تحضير', ic: 'bag' },
+  };
+  // الافتراضي: المشروبات للباريستا، والأكل للمطبخ، والبن المعبّى والمويه من غير تحضير، والعرض اللي فيه مشروب وأكل للاتنين
+  D.defRoute = (p) => p.station || (p.cat === 'beans' || p.id === 'water' ? 'none' : p.offer ? (p.drink ? 'both' : 'kitchen') : D.isDrink(p) ? 'bar' : 'kitchen');
+  D.catDefRoute = (cat) => {
+    const n = {};
+    D.PRODUCTS.filter((p) => p.cat === cat).forEach((p) => { const r = D.defRoute(p); n[r] = (n[r] || 0) + 1; });
+    return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || 'bar';
+  };
+  // صاحب المكان بيغيّرها من الإعدادات: للقسم كله، أو لصنف واحد
+  D.routeOf = (st, p) => {
+    if (!p) return 'none';
+    const R = (st && st.routes) || {};
+    return (R.items && R.items[p.id]) || (R.cats && R.cats[p.cat]) || D.defRoute(p);
+  };
+  D.lineRoute = (st, l) => l.st || D.routeOf(st, D.prod(l.pid));
+  D.liveQty = (o, i) => o.lines[i].qty - ((o.voided && o.voided[i]) || 0);
+  D.lineIn = (st, l, at) => { const r = D.lineRoute(st, l); return at === 'all' ? r !== 'none' : r === at || (r === 'both' && at !== 'none'); };
+  D.stationsOf = (st, o) => {
+    const out = [];
+    o.lines.forEach((l, i) => {
+      if (D.liveQty(o, i) <= 0) return;
+      const r = D.lineRoute(st, l);
+      (r === 'both' ? ['bar', 'kitchen'] : r === 'none' ? [] : [r]).forEach((x) => { if (!out.includes(x)) out.push(x); });
+    });
+    return out;
+  };
+  D.forStation = (st, o, at) => (at === 'all' ? D.stationsOf(st, o).length > 0 : D.stationsOf(st, o).includes(at));
+  // مرحلة الطلب عند كل شاشة: new لسه ما اتبدأش · make بيتعمل · ready نصيب الشاشة دي خلص
+  D.stStage = (o, at, now) => {
+    if (o.status === 'ready' || o.status === 'done') return 'ready';
+    if (at === 'all') {
+      const sts = D.stationsOf(D.state(), o).map((x) => D.stStage(o, x, now));
+      return sts.length && sts.every((x) => x === 'ready') ? 'ready' : sts.some((x) => x !== 'new') ? 'make' : 'new';
+    }
+    const sp = (o.sp || {})[at] || {};
+    if (sp.ready) return 'ready';
+    if (sp.start || (o.started && !o.sp) || (o.sim && (now || Date.now()) - (o.tsAcc || o.ts) > 50000)) return 'make';
+    return 'new';
+  };
 
   /* ---------- utils ---------- */
   const pad = (n) => String(n).padStart(2, '0');
@@ -342,7 +394,7 @@
   function restore(stock, lines) { lines.forEach((l) => { Object.entries(D.recipe(l)).forEach(([id, q]) => { stock[id] = D.r2((stock[id] ?? 0) + q); }); }); }
 
   function genOrder(R, S, t, opts) {
-    const ch = opts.ch || wpick(R, ['counter', 'table', 'pickup'], (x) => ({ counter: 72, table: 16, pickup: 12 }[x]));
+    const ch = opts.ch || wpick(R, ['counter', 'table', 'pickup', 'kiosk'], (x) => ({ counter: 62, table: 14, pickup: 10, kiosk: 14 }[x]));
     const n = wpick(R, [1, 2, 3, 4], (x) => ({ 1: 52, 2: 32, 3: 12, 4: 4 }[x]));
     const lines = [];
     for (let i = 0; i < n; i++) lines.push(genLine(R, S, S.stock, ch));
@@ -350,7 +402,8 @@
     if (ch === 'counter' && chance(R, .04)) disc = { type: 'pct', v: 10, reason: wpick(R, ['عميل دائم', 'موظف', 'تعويض تأخير'], () => 1) };
     const c = D.calc(S, lines, disc);
     let pays;
-    if (ch !== 'counter') pays = [{ m: 'online', a: c.total }];
+    if (ch === 'kiosk') pays = [{ m: chance(R, .62) ? 'mada' : 'apple', a: c.total }];
+    else if (ch !== 'counter') pays = [{ m: 'online', a: c.total }];
     else {
       const m = wpick(R, ['mada', 'apple', 'cash', 'stc', 'split'], (x) => ({ mada: 50, apple: 24, cash: 15, stc: 8, split: 3 }[x]));
       if (m === 'split') { const a = Math.min(c.total, 20); pays = [{ m: 'cash', a }, { m: 'mada', a: D.r2(c.total - a) }]; } else pays = [{ m, a: c.total }];
@@ -360,8 +413,8 @@
     const o = {
       id: 'o' + D.uid() + Math.floor(R() * 1e3), no: ++S.seq.no, inv: D.invNo(++S.seq.inv), ts: t, day: D.dayKey(t), ch,
       type: ch === 'table' ? 'table' : ch === 'pickup' ? 'takeaway' : (chance(R, .45) ? 'dinein' : 'takeaway'),
-      lines: lines.map((l) => Object.assign(l, { unit: D.unitPrice(S, l), total: D.lineTotal(S, l), cost: D.lineCost(l) })),
-      disc, total: c.total, vat: c.vat, net: c.net, pays, staff: opts.staff, reg, shift: opts.shift, status: 'done', sim: 1, synced: true,
+      lines: lines.map((l) => Object.assign(l, { unit: D.unitPrice(S, l), total: D.lineTotal(S, l), cost: D.lineCost(l), st: D.routeOf(S, D.prod(l.pid)) })),
+      disc, total: c.total, vat: c.vat, net: c.net, pays, staff: ch === 'kiosk' ? null : opts.staff, reg, shift: opts.shift, status: 'done', sim: 1, synced: true, consumed: true,
     };
     if (ch === 'table') o.table = 1 + Math.floor(R() * 14);
     o.name = cust ? cust.name.split(' ')[0] : (ch !== 'counter' || chance(R, .5) ? wpick(R, NAMES, () => 1) : '');
@@ -555,7 +608,13 @@
     st.seq.no = 0; st.day = day;
     return true;
   }
+  /* شاشة مربوطة بكاشير على جهاز تاني (link.js بيحط D.SAT = true):
+     الحالة جاية من الكاشير، ومفيش محاكاة ولا أرشفة ولا كتابة في التخزين المحلي — والأوامر بتروح للكاشير. */
+  D.SAT = false;
+  const blankSat = () => ({ v: 1, sat: 1, day: D.dayKey(Date.now()), rev: 0, seq: { no: 0, inv: 0 }, orders: [], holds: [], shifts: [], payouts: [], log: [], waste: [], receipts: [], counts: [], feed: [], pendingRemote: [], customers: [], prices: {}, avail: {}, stock: {}, routes: {}, settings: { sound: true, loyalNeed: CFG.loyalNeed || 8, vatOn: CFG.vatOn !== false }, tally: null });
+  D.adopt = (snap, why) => { S = Object.assign(blankSat(), snap); if (snap.store) Object.assign(D.STORE, snap.store); D.TRAIN = !!snap.train; D.REMOTE_REAL = !!snap.real; emit(why || 'remote'); };
   D.load = () => {
+    if (D.SAT) { if (!S) S = blankSat(); return S; }
     if (D.REAL) {
       const now = Date.now();
       const st = read();
@@ -570,9 +629,10 @@
     S = seed(now); write(S); return S;
   };
   D.state = () => S || D.load();
-  D.mutate = (fn, why) => { if (!S) D.load(); const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
+  D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
   D.reset = () => { try { localStorage.removeItem(KEY); localStorage.removeItem(CART_KEY); } catch (e) { /* */ } S = D.REAL ? emptyLive(Date.now()) : seed(Date.now()); write(S); bind(); emit('reset'); };
   window.addEventListener('storage', (e) => {
+    if (D.SAT) return;
     if (e.key === KEY && e.newValue) { try { const n = JSON.parse(e.newValue); const same = S && n.rev === S.rev && n.day === S.day; S = n; bind(); if (!same) emit('remote'); } catch (er) { /* */ } }
     if (e.key === CART_KEY) emit('cart');
   });
@@ -603,8 +663,11 @@
   function feedFor(o) {
     const ch = D.CH[o.ch];
     if (o.ch === 'counter') return { ts: o.ts, ic: 'register', t: `فاتورة ${o.inv} — ${D.fmt(o.total)} ر.س`, s: `كاشير ${o.reg} · ${D.staff(o.staff).short} · ${o.pays.map((p) => D.PAY[p.m].ar).join(' + ')}` };
-    return { ts: o.ts, ic: ch.ic, t: `طلب جديد من ${ch.ar}${o.table ? ' ' + o.table : ''} — #${o.no}`, s: `${o.name || 'عميل'} · ${D.fmt(o.total)} ر.س · ${o.unpaid ? 'الدفع عند الكاشير' : 'مدفوع أونلاين'}` };
+    return { ts: o.ts, ic: ch.ic, t: `طلب جديد من ${ch.ar}${o.table ? ' ' + o.table : ''} — #${o.no}`, s: `${o.name || 'عميل'} · ${D.fmt(o.total)} ر.س · ${o.unpaid ? 'الدفع عند الكاشير' : o.ch === 'kiosk' ? 'مدفوع على الكشك' : 'مدفوع أونلاين'}` };
   }
+  D.kioskCfg = (st) => Object.assign({ on: true, card: true, counter: true }, ((st || S || {}).settings || {}).kiosk || {});
+  // الدفع بالبطاقة على الكشك: في التدريب محاكاة، وفي التشغيل الحقيقي بيتفعّل لما يتربط بشركة دفع (DARJ_CONFIG.kiosk.card)
+  D.kioskCard = () => { const real = D.SAT ? !!D.REMOTE_REAL : D.REAL; return !real || !!(CFG.kiosk && CFG.kiosk.card); };
   D.feedPush = (item) => { S.feed.push(item); if (S.feed.length > 40) S.feed.splice(0, S.feed.length - 40); };
   D.log = (user, act, txt, appr, sev) => { S.log.push({ ts: Date.now(), user, act, txt, appr: appr || null, sev: sev || 'info' }); };
 
@@ -614,12 +677,12 @@
     const c = D.calc(s, draft.lines, draft.disc);
     const o = {
       id: 'o' + D.uid(), no: ++s.seq.no, inv: D.invNo(++s.seq.inv), ts: Date.now(), day: s.day, ch: 'counter', type: draft.type, table: draft.table,
-      lines: draft.lines.map((l) => ({ pid: l.pid, qty: l.qty, mods: l.mods, note: l.note, disc: l.disc, reward: l.reward ? 1 : undefined, unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l) })),
+      lines: draft.lines.map((l) => ({ pid: l.pid, qty: l.qty, mods: l.mods, note: l.note, disc: l.disc, reward: l.reward ? 1 : undefined, unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l), st: D.routeOf(s, D.prod(l.pid)) })),
       disc: draft.disc, total: c.total, vat: c.vat, net: c.net, pays: draft.pays, cash: draft.cash, creditBack: draft.creditBack || 0, credit: draft.credit || null, staff: draft.staff, reg: 1, shift: sh ? sh.id : null,
-      status: 'prep', tsAcc: Date.now(), synced: !s.settings.offline, name: draft.name || '',
+      status: 'prep', tsAcc: Date.now(), synced: !s.settings.offline, name: draft.name || '', consumed: true,
     };
     if (draft.cust) { const cu = s.customers.find((x) => x.id === draft.cust); if (cu) { o.cust = cu.id; o.name = o.name || cu.name.split(' ')[0]; earn(s, cu, o); if (draft.redeem) { cu.rewards = Math.max(0, (cu.rewards || 0) - 1); o.redeemed = 1; } } }
-    if (!o.lines.some((l) => D.isDrink(D.prod(l.pid)))) { o.status = 'done'; o.tsReady = o.tsDone = o.ts; }
+    if (!D.stationsOf(s, o).length) { o.status = 'done'; o.tsReady = o.tsDone = o.ts; }
     consume(s.stock, o.lines);
     s.orders.push(o);
     D.feedPush(feedFor(o));
@@ -634,10 +697,68 @@
     if (st === 'prep') o.tsAcc = now;
     if (st === 'ready') o.tsReady = now;
     if (st === 'done') { o.tsDone = now; if (!o.tsReady) o.tsReady = now; }
-    if (st === 'rejected') { restore(s.stock, o.lines); o.tsDone = now; o.cancelled = 1; }
+    if (st === 'rejected') { if (o.consumed !== false) restore(s.stock, o.lines); o.tsDone = now; o.cancelled = 1; }
     if (D.hooks.status && o.ext) D.hooks.status(o, st);
     return o;
   }, 'status');
+
+  /* ---------- التحضير: كل شاشة بتحرّك نصيبها من الطلب ----------
+     D.act(op, args) هي اللي بتستخدمها الشاشات. على الأجهزة المربوطة (link.js) الأمر بيتبعت للكاشير وهو اللي بينفّذ. */
+  const findO = (s, id) => s.orders.find((x) => x.id === id);
+  const sts = (s, o, at) => (at === 'all' || !at ? D.stationsOf(s, o) : [at]);
+  D.ACT = {
+    start: (a) => D.mutate((s) => {
+      const o = findO(s, a.id); if (!o || !['prep', 'new'].includes(o.status)) return;
+      const now = Date.now(); o.sp = o.sp || {};
+      sts(s, o, a.st).forEach((x) => { o.sp[x] = Object.assign({}, o.sp[x]); if (!o.sp[x].start) o.sp[x].start = now; });
+      o.started = o.started || now;
+    }, 'kds'),
+    ready: (a) => D.mutate((s) => {
+      const o = findO(s, a.id); if (!o || o.status !== 'prep') return false;
+      const now = Date.now(); o.sp = o.sp || {};
+      sts(s, o, a.st).forEach((x) => { o.sp[x] = Object.assign({}, o.sp[x]); if (!o.sp[x].start) o.sp[x].start = now; o.sp[x].ready = now; });
+      o.started = o.started || now;
+      const all = D.stationsOf(s, o).every((x) => o.sp[x] && o.sp[x].ready);
+      if (all) { o.status = 'ready'; o.tsReady = now; if (D.hooks.status && o.ext) D.hooks.status(o, 'ready'); }
+      return all;
+    }, 'kds'),
+    back: (a) => D.mutate((s) => { // رجّع نصيب الشاشة لـ«بيتعمل» لو اتضغط جاهز بالغلط
+      const o = findO(s, a.id); if (!o || !['prep', 'ready'].includes(o.status)) return;
+      o.sp = o.sp || {};
+      sts(s, o, a.st).forEach((x) => { if (o.sp[x]) delete o.sp[x].ready; });
+      if (o.status === 'ready') { o.status = 'prep'; delete o.tsReady; if (D.hooks.status && o.ext) D.hooks.status(o, 'prep'); }
+    }, 'kds'),
+    pickup: (a) => D.setStatus(a.id, 'done'),
+    line: (a) => D.mutate((s) => { const o = findO(s, a.id); if (!o) return; o.lineDone = (o.lineDone || []).filter((x) => x !== a.i); if (a.done) o.lineDone.push(a.i); }, 'kds'),
+    kiosk: (a) => D.kioskOrder(a.draft),
+  };
+  D.act = (op, a) => (D.ACT[op] ? D.ACT[op](a || {}) : null);
+
+  // طلب من الكشك (الدفع الذاتي): مدفوع بالبطاقة = للتحضير على طول · الدفع عند الكاشير = يستنى التحصيل
+  D.kioskOrder = (d) => D.mutate((s) => {
+    const dup = d.kid && s.orders.find((o) => o.kid === d.kid); if (dup) return dup;
+    const now = Date.now();
+    const lines = (d.lines || []).filter((l) => D.prod(l.pid) && l.qty > 0).map((l) => ({ pid: l.pid, qty: Math.min(20, l.qty), mods: l.mods || D.defMods(D.prod(l.pid)), note: l.note || '', unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l), st: D.routeOf(s, D.prod(l.pid)) }));
+    if (!lines.length) return null;
+    const c = D.calc(s, lines, null);
+    const paid = !!d.pay;
+    const sh = D.openShift(s, 1);
+    const o = { id: 'o' + D.uid(), kid: d.kid, no: ++s.seq.no, inv: paid ? D.invNo(++s.seq.inv) : null, ts: now, day: s.day, ch: 'kiosk', type: d.type === 'dinein' ? 'dinein' : 'takeaway', lines, disc: null,
+      total: c.total, vat: c.vat, net: c.net, pays: paid ? [{ m: d.pay.m || 'mada', a: c.total, auth: d.pay.auth }] : [], unpaid: !paid, payFirst: !paid, staff: null, reg: 1, shift: paid && sh ? sh.id : null,
+      status: paid ? 'prep' : 'new', tsAcc: paid ? now : null, synced: true, name: (d.name || '').slice(0, 30), consumed: paid };
+    if (paid) { consume(s.stock, lines); if (!D.stationsOf(s, o).length) { o.status = 'done'; o.tsReady = o.tsDone = now; } }
+    s.orders.push(o); D.feedPush(feedFor(o));
+    D.log(null, 'kiosk', `طلب من الكشك #${o.no} — ${D.fmt(o.total)} ر.س — ${paid ? D.PAY[o.pays[0].m].ar + ' على الكشك' : 'الدفع عند الكاشير'}`);
+    return o;
+  }, 'kiosk');
+
+  // أرقام كل شاشة النهارده (للهيدر): في الطابور · متوسط التحضير · اتسلّم
+  D.kdsStats = (s, at) => {
+    if (s.tally && s.tally[at]) return s.tally[at];
+    const mine = D.today(s).filter((o) => D.forStation(s, o, at));
+    const timed = mine.map((o) => { const sp = (o.sp || {})[at === 'all' ? D.stationsOf(s, o)[0] : at] || {}; const end = sp.ready || o.tsReady; const st0 = o.tsAcc || o.ts; return end && st0 ? end - st0 : 0; }).filter((x) => x > 0);
+    return { open: mine.filter((o) => o.status === 'prep' && D.stStage(o, at) !== 'ready').length, avg: timed.length ? timed.reduce((a, x) => a + x, 0) / timed.length : 0, done: mine.filter((o) => o.status === 'done').length };
+  };
 
   /* ---------- refunds: إلغاء كامل · مرتجع جزئي · استبدال ---------- */
   // الكمية اللي لسه ممكن ترجع من كل سطر
@@ -724,9 +845,9 @@
   // طلب جاي من المنيو الأونلاين (QR الطاولة) — بيتحصّل عند الكاشير
   D.addOnline = (ext) => D.mutate((s) => {
     if (ext.ext && s.orders.some((o) => o.ext === ext.ext)) return null;
-    const lines = ext.lines.map((l) => Object.assign({}, l, { unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l) }));
+    const lines = ext.lines.map((l) => Object.assign({}, l, { unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l), st: D.routeOf(s, D.prod(l.pid)) }));
     const c = D.calc(s, lines, null);
-    const o = Object.assign({ id: 'o' + D.uid(), no: ++s.seq.no, inv: null, ts: Date.now(), day: s.day, ch: 'table', type: 'table', status: s.settings.autoAccept ? 'prep' : 'new', pays: [], unpaid: true, staff: null, reg: 1, shift: null, synced: true }, ext, { lines, total: c.total, vat: c.vat, net: c.net });
+    const o = Object.assign({ id: 'o' + D.uid(), no: ++s.seq.no, inv: null, ts: Date.now(), day: s.day, ch: 'table', type: 'table', status: s.settings.autoAccept ? 'prep' : 'new', pays: [], unpaid: true, staff: null, reg: 1, shift: null, synced: true, consumed: false }, ext, { lines, total: c.total, vat: c.vat, net: c.net });
     if (o.status === 'prep') o.tsAcc = Date.now();
     s.orders.push(o); D.feedPush(feedFor(o));
     return o;
@@ -737,6 +858,9 @@
     const sh = D.openShift(s, 1);
     Object.assign(o, { pays: draft.pays, cash: draft.cash, unpaid: false, paidAt: Date.now(), staff: draft.staff, shift: sh ? sh.id : o.shift, reg: 1, synced: !s.settings.offline });
     if (!o.inv) o.inv = D.invNo(++s.seq.inv);
+    if (o.consumed === false) { consume(s.stock, o.lines); o.consumed = true; }
+    // طلب الكشك «الدفع عند الكاشير»: بعد التحصيل بيروح للتحضير على طول
+    if (o.payFirst && o.status === 'new') { o.status = D.stationsOf(s, o).length ? 'prep' : 'done'; o.tsAcc = Date.now(); if (o.status === 'done') o.tsReady = o.tsDone = o.tsAcc; }
     D.log(draft.staff, 'collect', `تحصيل طلب #${o.no} (${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}) — ${D.fmt(o.total)} ر.س`);
     return o;
   }, 'order');
@@ -756,7 +880,7 @@
   }
   let nextAt = Date.now() + 9000, lastWrite = 0;
   D.tick = () => {
-    if (!S || !isLeader()) return;
+    if (!S || D.SAT || !isLeader()) return;
     const now = Date.now();
     if (D.dayKey(now) !== S.day) { if (D.REAL) { S = read() || S; rollover(S, now); write(S); bind(); emit('day'); } else D.reset(); return; }
     const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); }
@@ -780,6 +904,10 @@
         o.sim = 1; o.status = o.lines.some((l) => D.isDrink(D.prod(l.pid))) ? 'prep' : 'done'; o.tsAcc = now;
         if (s.settings.offline) { o.synced = false; s.pendingRemote.push(o); changed = changed || 'tick'; }
         else { s.orders.push(o); D.feedPush(feedFor(o)); changed = changed || 'reg2'; }
+      } else if (roll >= .85 && sh1 && !s.settings.offline && D.kioskCfg(s).on) { // طلب من الكشك مدفوع بالبطاقة
+        const o = genOrder(R, s, now, { ch: 'kiosk', reg: 1, staff: null, shift: sh1.id });
+        o.sim = 1; o.tsAcc = now; o.status = D.stationsOf(s, o).length ? 'prep' : 'done';
+        s.orders.push(o); D.feedPush(feedFor(o)); changed = 'kiosk';
       }
     }
     s.cutoff = now;
@@ -802,7 +930,7 @@
   }, 'net');
 
   /* ---------- cart broadcast (لشاشة العميل) ---------- */
-  D.pushCart = (c) => { try { localStorage.setItem(CART_KEY, JSON.stringify(Object.assign({ ts: Date.now() }, c))); } catch (e) { /* */ } };
+  D.pushCart = (c) => { const x = Object.assign({ ts: Date.now() }, c); try { localStorage.setItem(CART_KEY, JSON.stringify(x)); } catch (e) { /* */ } if (D.hooks && D.hooks.cart) D.hooks.cart(x); };
   D.readCart = () => { try { return JSON.parse(localStorage.getItem(CART_KEY) || 'null'); } catch (e) { return null; } };
 
   /* ---------- ZATCA QR (المرحلة الأولى: TLV → Base64) ---------- */
@@ -843,7 +971,7 @@
       <div class="rc-kv"><span>رقم الفاتورة</span><span>${o.inv}</span></div>
       <div class="rc-kv"><span>التاريخ</span><span>${D.dateNum(o.ts)} ${D.time24(o.ts)}</span></div>
       <div class="rc-kv"><span>رقم الطلب</span><span>#${o.no}</span></div>
-      <div class="rc-kv"><span>الكاشير</span><span style="font-family:var(--f)">${D.esc(D.staff(o.staff).short)} · كاشير ${o.reg}</span></div>
+      <div class="rc-kv"><span>الكاشير</span><span style="font-family:var(--f)">${o.ch === 'kiosk' && !o.staff ? 'الكشك · دفع ذاتي' : `${D.esc(D.staff(o.staff).short)} · كاشير ${o.reg}`}</span></div>
       <div class="rc-kv"><span>نوع الطلب</span><span style="font-family:var(--f)">${o.ch !== 'counter' ? D.CH[o.ch].ar : D.TYPES[o.type].ar}${o.table ? ' ' + o.table : ''}</span></div>
       <hr class="rc-hr">${lines}<hr class="rc-hr">
       ${c.lineDisc ? `<div class="rc-kv"><span>خصم الأصناف</span><span>-${D.fmt(c.lineDisc)}</span></div>` : ''}
@@ -961,6 +1089,10 @@
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>',
     play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.6v6.8l5.6-3.4L10 8.6Z" fill="currentColor"/>',
     swap: '<path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/>',
+    kiosk: '<rect x="5" y="2.5" width="14" height="13" rx="2"/><path d="M12 15.5V20M8 21h8M9 7h6M9 10.5h3.5"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    route: '<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12H11c2 0 2.5-6.5 5.8-6.5M11 12c2 0 2.5 6.5 5.8 6.5"/>',
+    tv: '<rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
   };
   D.icon = (n, cls) => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || P.cup}</svg>`;
   D.mark = (size) => `<svg class="brand__mark" ${size ? `style="width:${size}px;height:${size}px"` : ''} viewBox="0 0 32 32" aria-hidden="true"><rect x="9.5" y="1.5" width="13" height="9" rx="1.5" fill="#fff" stroke="#15130F" stroke-width="1.6"/><path d="M12.5 4.6h7M12.5 7.2h4.5" stroke="#15130F" stroke-width="1.4" stroke-linecap="round"/><rect x="2" y="9" width="28" height="21" rx="6.5" fill="#15130F"/><rect x="6" y="18.5" width="20" height="8" rx="3" fill="#0E7A55"/><rect x="12.5" y="21.6" width="7" height="1.9" rx=".95" fill="#fff"/><rect x="8" y="12.4" width="16" height="2" rx="1" fill="#fff" opacity=".28"/></svg>`;
@@ -1031,8 +1163,10 @@
   let AC = null;
   const unlock = () => { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } } if (AC && AC.state === 'suspended') AC.resume(); };
   ['pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, unlock, { passive: true }));
+  // صوت كل شاشة على حدة (الباريستا ممكن يكتم شاشته من غير ما يكتم الكاشير)
+  D.devMute = (on) => { try { if (on == null) return localStorage.getItem(BASE + ':mute:' + location.pathname.split('/').pop() + location.search) === '1'; localStorage.setItem(BASE + ':mute:' + location.pathname.split('/').pop() + location.search, on ? '1' : '0'); } catch (e) { /* */ } return !!on; };
   D.sound = (kind) => {
-    if (!AC || (S && S.settings && !S.settings.sound)) return;
+    if (!AC || (S && S.settings && !S.settings.sound) || D.devMute()) return;
     const notes = { new: [[880, 0], [1320, .12]], ready: [[660, 0], [990, .1], [1320, .2]], beep: [[1900, 0]], ok: [[740, 0], [1110, .09]], err: [[220, 0]] }[kind] || [[880, 0]];
     notes.forEach(([f, d]) => {
       const o = AC.createOscillator(); const g = AC.createGain();
@@ -1058,7 +1192,9 @@
 
   /* ---------- live loop ---------- */
   D.startLive = () => {
-    D.load(); setInterval(D.tick, 3000); setTimeout(D.tick, 1500);
+    D.load();
+    if (D.SAT) return;
+    setInterval(D.tick, 3000); setTimeout(D.tick, 1500);
     if (D.REAL) {
       const sync = () => { const off = !navigator.onLine; if (!!D.state().settings.offline !== off) D.goOffline(off, null); };
       window.addEventListener('online', sync); window.addEventListener('offline', sync); setTimeout(sync, 800);
