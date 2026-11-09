@@ -6,6 +6,7 @@
   const D = (window.DARJ = window.DARJ || {});
   // إعدادات النسخة (DARJ_CONFIG): ديمو عام، أو نسخة حقيقية لعميل (mode: 'live') ومعاها وضع تدريب
   const CFG = window.DARJ_CONFIG || {};
+  const vatOnOf = (st) => { const v = st && st.settings ? st.settings.vatOn : undefined; return v === undefined ? CFG.vatOn !== false : v !== false; };
   D.CFG = CFG;
   D.LIVE = CFG.mode === 'live';
   const BASE = CFG.key || 'darj:v1';
@@ -358,7 +359,7 @@
     let dv = 0;
     if (disc) dv = disc.type === 'pct' ? D.r2(gross * disc.v / 100) : Math.min(gross, disc.v);
     const total = D.r2(gross - dv);
-    const vat = S && S.settings && S.settings.vatOn === false ? 0 : D.r2(total * 15 / 115);
+    const vat = vatOnOf(S) ? D.r2(total * 15 / 115) : 0;
     const lineDisc = D.r2(lines.reduce((a, l) => a + D.lineGross(S, l) - D.lineTotal(S, l), 0));
     return { gross, disc: dv, lineDisc, total, vat, net: D.r2(total - vat) };
   };
@@ -439,7 +440,7 @@
     const S = {
       v: 1, day, created: now, seq: { inv: 10400 + Math.floor(R() * 90), no: 100, cn: 31, z: 412, po: 88 },
       orders: [], holds: [], shifts: [], payouts: [], log: [], waste: [], receipts: [], counts: [], feed: [], pendingRemote: [],
-      prices: {}, avail: {}, stock: {}, settings: { live: true, autoAccept: false, sound: true, offline: false, loyalNeed: 8, lang: 'ar', printer: true },
+      prices: {}, avail: {}, stock: {}, settings: { live: true, autoAccept: false, sound: true, offline: false, loyalNeed: 8, lang: 'ar', printer: true, vatOn: CFG.vatOn !== false },
       customers: CUSTOMERS.map(([name, visits, tag], i) => ({
         id: 'c' + (i + 1), name, phone: '05000' + String(10000 + Math.floor(R() * 89999)).slice(0, 5), visits, tag,
         stamps: Math.floor(R() * 7), spend: D.r2(visits * (24 + R() * 18)), last: bs - Math.floor(R() * 9 * 864e5), fav: wpick(R, D.PRODUCTS.filter((p) => D.isDrink(p)), (x) => x.pop).id,
@@ -629,6 +630,10 @@
     S = seed(now); write(S); return S;
   };
   D.state = () => S || D.load();
+  D.vatOn = () => vatOnOf(S);
+  D.orderVat = (o) => (o && o.total > 0 ? o.vat > 0 : D.vatOn());
+  D.exVat = (p) => (D.vatOn() ? p / 1.15 : p);
+  D.noteName = (o) => (D.orderVat(o) ? { ar: 'إشعار دائن', en: 'Credit note' } : { ar: 'إشعار مرتجع', en: 'Refund note' });
   D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
   D.reset = () => { try { localStorage.removeItem(KEY); localStorage.removeItem(CART_KEY); } catch (e) { /* */ } S = D.REAL ? emptyLive(Date.now()) : seed(Date.now()); write(S); bind(); emit('reset'); };
   window.addEventListener('storage', (e) => {
@@ -791,7 +796,7 @@
       const merged = {}; parts.forEach((p) => { merged[p.m] = D.r2((merged[p.m] || 0) + p.a); });
       parts = Object.entries(merged).map(([m, v]) => ({ m, a: v }));
     }
-    return { a, vat: D.state().settings.vatOn === false ? 0 : D.r2(a * 15 / 115), parts };
+    return { a, vat: D.orderVat(o) ? D.r2(a * 15 / 115) : 0, parts };
   };
   D.refundCash = (r) => (r.parts ? r.parts.filter((p) => p.m === 'cash').reduce((a, p) => a + p.a, 0) : r.m === 'cash' ? r.a : 0);
   D.refund = (id, pick, meta) => D.mutate((s) => {
@@ -955,7 +960,7 @@
     const s = D.state();
     const z = D.tlv(o);
     const c = D.calc(s, o.lines, o.disc);
-    const vatOn = s.settings.vatOn !== false;
+    const vatOn = D.orderVat(o);
     const lines = o.lines.map((l) => {
       const p = D.prod(l.pid);
       const mods = D.modText(l).join(' · ');
@@ -980,7 +985,7 @@
       <div class="rc-kv"><span>ضريبة القيمة المضافة 15%</span><span>${D.fmt(o.vat)}</span></div>` : ''}
       <div class="rc-kv rc-tot"><span>${vatOn ? 'الإجمالي شامل الضريبة' : 'الإجمالي'}</span><span>${D.fmt(o.total)}</span></div><div class="rc-c" style="font-size:10px;color:#666">المبالغ بالريال السعودي</div>
       <hr class="rc-hr">${pays}${o.cash ? `<div class="rc-kv"><span>المدفوع كاش</span><span>${D.fmt(o.cash.tendered)}</span></div><div class="rc-kv"><span>الباقي</span><span>${D.fmt(o.cash.change)}</span></div>` : ''}
-      ${o.refunds && o.refunds.length ? `<hr class="rc-hr">${o.refunds.map((r) => `<div class="rc-kv"><span>إشعار دائن ${r.cn}</span><span>-${D.fmt(r.a)}</span></div>`).join('')}` : ''}
+      ${o.refunds && o.refunds.length ? `<hr class="rc-hr">${o.refunds.map((r) => `<div class="rc-kv"><span>${D.noteName(o).ar} ${r.cn}</span><span>-${D.fmt(r.a)}</span></div>`).join('')}` : ''}
       ${vatOn ? `<div class="rc-qr">${D.qrSVG(z.b64)}<small>امسح للتحقق — هيئة الزكاة والضريبة والجمارك</small></div>` : ''}
       ${st ? `<div class="rc-foot">${D.esc(st.name.split(' ')[0])}، رصيدك ${st.stamps} من ${s.settings.loyalNeed} أختام${st.rewards ? ` · لديك ${st.rewards} مشروب هدية` : ''}</div>` : ''}
       <div class="rc-foot">${D.esc(CFG.thanks || 'شكرًا لزيارتكم')} ${opt.copy ? '· <b>نسخة</b>' : ''}${CFG.poweredBy === false ? '' : '<br>Powered by <b>DARJ</b>'}</div>
@@ -990,6 +995,7 @@
     opt = opt || {};
     const s = D.state();
     const iso = new Date(r.ts).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const vatOn = D.orderVat(o);
     const enc = new TextEncoder(); const bytes = [];
     [[1, D.STORE.sellerAr], [2, D.STORE.vat], [3, iso], [4, D.fmt(r.a).replace(/,/g, '')], [5, D.fmt(r.vat || r.a * 15 / 115).replace(/,/g, '')]].forEach(([t, v]) => { const b = enc.encode(v); bytes.push(t, b.length, ...b); });
     let bin = ''; bytes.forEach((b) => { bin += String.fromCharCode(b); });
@@ -997,16 +1003,16 @@
     const kv = (a, b) => `<div class="rc-kv"><span>${a}</span><span>${b}</span></div>`;
     return `<div class="receipt${opt.print ? ' print' : ''}">
       <div class="rc-logo rc-c"><b>${D.STORE.nameEn}</b><span>${D.STORE.sellerAr}</span></div>
-      <div class="rc-c">الرقم الضريبي: <span class="mono">${D.STORE.vat}</span></div>
-      <hr class="rc-hr"><div class="rc-c rc-t">إشعار دائن<br><span class="mono" style="font-weight:500;font-size:11px">Credit Note</span></div><hr class="rc-hr">
+      ${vatOn && D.STORE.vat ? `<div class="rc-c">الرقم الضريبي: <span class="mono">${D.STORE.vat}</span></div>` : ''}
+      <hr class="rc-hr"><div class="rc-c rc-t">${vatOn ? 'إشعار دائن' : 'إشعار مرتجع'}<br><span class="mono" style="font-weight:500;font-size:11px">${vatOn ? 'Credit Note' : 'Refund Note'}</span></div><hr class="rc-hr">
       ${kv('رقم الإشعار', r.cn)}${kv('مرجع الفاتورة', o.inv)}${kv('التاريخ', `${D.dateNum(r.ts)} ${D.time24(r.ts)}`)}${kv('السبب', `<span style="font-family:var(--f)">${D.esc(r.reason)}</span>`)}
       <hr class="rc-hr">${rows}<hr class="rc-hr">
-      ${kv('المبلغ قبل الضريبة', D.fmt(r.a - (r.vat || 0)))}${kv('ضريبة القيمة المضافة 15%', D.fmt(r.vat || 0))}
+      ${vatOn ? kv('المبلغ قبل الضريبة', D.fmt(r.a - (r.vat || 0))) + kv('ضريبة القيمة المضافة 15%', D.fmt(r.vat || 0)) : ''}
       <div class="rc-kv rc-tot"><span>إجمالي المرتجع</span><span>${D.fmt(r.a)}</span></div>
       <hr class="rc-hr">${(r.parts || [{ m: r.m, a: r.a }]).map((p) => kv(`يُعاد ${p.m === 'exchange' ? 'كرصيد استبدال' : 'عبر ' + D.PAY[p.m].ar}`, D.fmt(p.a))).join('')}
       ${kv('نفّذه', `<span style="font-family:var(--f)">${D.esc(D.staff(r.by).short)}${r.appr ? ' · وافق ' + D.esc(D.staff(r.appr).short) : ''}</span>`)}
-      <div class="rc-qr">${D.qrSVG(btoa(bin))}<small>إشعار دائن مرتبط بالفاتورة ${o.inv}</small></div>
-      <div class="rc-foot">Powered by <b>DARJ</b></div>
+      ${vatOn ? `<div class="rc-qr">${D.qrSVG(btoa(bin))}<small>إشعار دائن مرتبط بالفاتورة ${o.inv}</small></div>` : ''}
+      ${CFG.poweredBy === false ? '' : '<div class="rc-foot">Powered by <b>DARJ</b></div>'}
     </div>`;
   };
   D.zHTML = (sh, st) => {
@@ -1017,11 +1023,11 @@
       <hr class="rc-hr"><div class="rc-c rc-t">${sh.close ? 'تقرير Z — إقفال وردية' : 'تقرير X — منتصف الوردية'}<br><span class="mono" style="font-weight:500;font-size:11px">${sh.z || 'X-' + D.time24(Date.now()).replace(':', '')}</span></div><hr class="rc-hr">
       ${row('الكاشير', `<span style="font-family:var(--f)">${D.esc(D.staff(sh.user).short)} · كاشير ${sh.reg}</span>`)}
       ${row('من', `${D.dateNum(sh.open)} ${D.time24(sh.open)}`)}${row('إلى', sh.close ? `${D.dateNum(sh.close)} ${D.time24(sh.close)}` : 'مفتوحة')}
-      <hr class="rc-hr">${row('عدد الفواتير', st.count)}${row('إجمالي المبيعات', D.fmt(st.total))}${row('منها ضريبة 15%', D.fmt(st.vat))}${row('الخصومات', D.fmt(st.disc))}${row('المرتجعات', D.fmt(st.refunds))}
+      <hr class="rc-hr">${row('عدد الفواتير', st.count)}${row('إجمالي المبيعات', D.fmt(st.total))}${D.vatOn() || st.vat ? row('منها ضريبة 15%', D.fmt(st.vat)) : ''}${row('الخصومات', D.fmt(st.disc))}${row('المرتجعات', D.fmt(st.refunds))}
       <hr class="rc-hr">${row('كاش', D.fmt(by.cash))}${row('مدى', D.fmt(by.mada))}${row('Apple Pay', D.fmt(by.apple))}${row('STC Pay', D.fmt(by.stc))}${row('أونلاين', D.fmt(by.online))}
       <hr class="rc-hr">${row('عهدة البداية', D.fmt(sh.float))}${row('مصروفات من الدرج', '-' + D.fmt(st.payouts))}
       ${sh.close ? `${row('المتوقع في الدرج', D.fmt(sh.expected))}${row('المعدود فعلًا', D.fmt(sh.counted))}<div class="rc-kv rc-tot"><span>${sh.variance < 0 ? 'عجز' : sh.variance > 0 ? 'زيادة' : 'مطابق'}</span><span>${D.fmt(Math.abs(sh.variance))}</span></div>` : ''}
-      <div class="rc-foot">${sh.close ? 'أُقفلت بقفل أعمى — عدّ الكاشير الدرج دون رؤية المتوقع' : 'تقرير X لا يُصفّر العدادات'}<br>Powered by <b>DARJ</b></div>
+      <div class="rc-foot">${sh.close ? 'أُقفلت بقفل أعمى — عدّ الكاشير الدرج دون رؤية المتوقع' : 'تقرير X لا يُصفّر العدادات'}${CFG.poweredBy === false ? '' : '<br>Powered by <b>DARJ</b>'}</div>
     </div>`;
   };
 
