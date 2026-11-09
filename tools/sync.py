@@ -2,7 +2,7 @@
 import io, os, re, shutil
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.abspath(os.path.join(ROOT, '..', 'darj-pos'))
-V = '5'
+V = '6'
 
 for f in ['darj.css', 'darj.js', 'app.js', 'kds.js', 'link.js', 'kiosk.js']:
     shutil.copy(os.path.join(SRC, 'assets', f), os.path.join(ROOT, 'assets', f))
@@ -44,4 +44,6 @@ idx = os.path.join(ROOT, 'index.html')
 s = io.open(idx, encoding='utf-8').read()
 s = re.sub(r'\?v=\d+"', f'?v={V}"', s)
 io.open(idx, 'w', encoding='utf-8').write(fin(s))
+sw = io.open(os.path.join(ROOT, 'tools', 'sw.template.js'), encoding='utf-8').read().replace('__V__', V)
+io.open(os.path.join(ROOT, 'sw.js'), 'w', encoding='utf-8', newline=chr(10)).write(sw)
 print('synced from darj-pos')
