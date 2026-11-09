@@ -2,10 +2,13 @@
 import io, os, re, shutil
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.abspath(os.path.join(ROOT, '..', 'darj-pos'))
-V = '3'
+V = '4'
 
 for f in ['darj.css', 'darj.js', 'app.js', 'kds.js', 'link.js', 'kiosk.js']:
     shutil.copy(os.path.join(SRC, 'assets', f), os.path.join(ROOT, 'assets', f))
+os.makedirs(os.path.join(ROOT, 'assets', 'audio'), exist_ok=True)
+for f in ['order-up-bell.mp3', 'ORDER_BELL_LICENSE.txt']:
+    shutil.copy(os.path.join(SRC, 'assets', 'audio', f), os.path.join(ROOT, 'assets', 'audio', f))
 os.makedirs(os.path.join(ROOT, 'assets', 'vendor'), exist_ok=True)
 vendor = os.path.join(ROOT, '..', 'luxury-crop-system', 'assets', 'vendor', 'supabase-2.116.0.js')
 shutil.copy(vendor, os.path.join(ROOT, 'assets', 'vendor', 'supabase-2.116.0.js'))

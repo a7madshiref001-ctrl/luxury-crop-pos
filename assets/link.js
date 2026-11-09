@@ -109,7 +109,7 @@
     return {
       v: 1, rev: s.rev || 0, day: s.day, train: !!D.TRAIN, real: !!D.REAL, seq: { no: s.seq.no },
       store: { nameAr: D.STORE.nameAr, nameEn: D.STORE.nameEn, branchAr: D.STORE.branchAr, branchEn: D.STORE.branchEn, tagEn: D.STORE.tagEn, addr: D.STORE.addr },
-      settings: { sound: s.settings.sound, loyalNeed: s.settings.loyalNeed, vatOn: s.settings.vatOn, offline: s.settings.offline, kiosk: s.settings.kiosk || null },
+      settings: { sound: s.settings.sound, orderTone: s.settings.orderTone, orderVol: s.settings.orderVol, orderRepeat: s.settings.orderRepeat, loyalNeed: s.settings.loyalNeed, vatOn: s.settings.vatOn, offline: s.settings.offline, kiosk: s.settings.kiosk || null },
       prices: s.prices || {}, avail: s.avail || {}, routes: s.routes || {}, tally, orders: live.map(slim),
     };
   }

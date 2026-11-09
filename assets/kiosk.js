@@ -24,6 +24,7 @@
   const cfg = () => D.kioskCfg(S());
   const cardOk = () => cfg().card && D.kioskCard();
   const online = () => L.hubOnline();
+  const hasBoard = () => !(D.CFG && D.CFG.board === false); // شاشة حالة الطلبات شغالة في المكان؟
 
   /* ---------- screens ---------- */
   function hello() {
@@ -35,7 +36,7 @@
         <div class="kh__brand">${D.brand('Self-order')}</div>
         <span class="label">Order here · اطلب من هنا</span>
         <h1>${closed ? 'Closed<br>for now.' : 'Order<br>&amp; pay here.'}</h1>
-        <p>${closed ? 'الكشك مغلق حاليًا — تفضّل بالطلب من الكاشير.' : 'اختر مشروبك وطلبك وادفع من هنا. بعد الدفع يصل طلبك للباريستا والمطبخ مباشرة، ويظهر رقمك على الشاشة.'}</p>
+        <p>${closed ? 'الكشك مغلق حاليًا — تفضّل بالطلب من الكاشير.' : 'اختر مشروبك وطلبك وادفع من هنا. بعد الدفع يصل طلبك للباريستا والمطبخ مباشرة' + (hasBoard() ? '، ويظهر رقمك على الشاشة.' : '، وسننادي على رقمك لما يجهز.')}</p>
         ${closed ? '' : `<div class="kh__go">
           <button class="kh__opt" data-type="dinein">${I('table')}${bi('Dine in', 'محلي — هنا في الكافيه')}</button>
           <button class="kh__opt" data-type="takeaway">${I('bag')}${bi('Takeaway', 'سفري — للخارج')}</button></div>`}
@@ -103,7 +104,7 @@
       <div class="kdone__no"><small>رقم طلبك</small><b>#${r.no}</b></div>
       <h2>${paid ? (sts.length ? `وصل طلبك ${sts.map((x) => (x === 'bar' ? 'للباريستا' : 'للمطبخ')).join(' و')} — جارٍ تجهيزه الآن` : 'طلبك جاهز — استلمه من الكاشير') : 'تفضّل للكاشير وأخبره برقمك، ويبدأ التحضير بعد الدفع'}</h2>
       <div class="kdone__steps"><span class="on">${I('check', 'sm')}${bi('Received', 'استلمنا')}</span><i></i><span class="${paid ? 'on' : ''}">${I(paid ? 'check' : 'cash', 'sm')}${bi('Paid', paid ? 'تم الدفع' : 'عند الكاشير')}</span><i></i><span>${I('cup', 'sm')}${bi('Preparing', 'قيد التحضير')}</span><i></i><span>${I('bell', 'sm')}${bi('Ready', 'جاهز')}</span></div>
-      <p>تابع رقمك على شاشة الطلبات${r.name ? `، وسننادي عليك يا <b>${esc(r.name)}</b>` : ''}.${paid ? ` · ${fmt(r.total)} ر.س` : ` · المطلوب ${fmt(r.total)} ر.س`}</p>
+      <p>${hasBoard() ? `تابع رقمك على شاشة الطلبات${r.name ? `، وسننادي عليك يا <b>${esc(r.name)}</b>` : ''}` : r.name ? `سننادي عليك يا <b>${esc(r.name)}</b> لما يجهز طلبك` : 'احتفظ برقمك، وسننادي عليه لما يجهز طلبك'}.${paid ? ` · ${fmt(r.total)} ر.س` : ` · المطلوب ${fmt(r.total)} ر.س`}</p>
       <button class="btn btn--ink btn--lg" data-a="new">${bi('New order', 'طلب جديد')} <span class="muted" id="cd"></span></button>
     </div>`;
     let n = 15;
@@ -192,7 +193,7 @@
     const p = e.target.closest('[data-p]');
     if (p) { sheet(p.dataset.p); return; }
     const q = e.target.closest('[data-q]');
-    if (q) { const i = +q.dataset.q; lines[i].qty += +q.dataset.d; if (lines[i].qty <= 0) lines.splice(i, 1); if (!lines.length) openCart = false; render(); return; }
+    if (q) { const i = +q.dataset.q; lines[i].qty = Math.min(20, lines[i].qty + +q.dataset.d); if (lines[i].qty <= 0) lines.splice(i, 1); if (!lines.length) openCart = false; render(); return; }
     const py = e.target.closest('[data-pay]');
     if (py) { place(py.dataset.pay); return; }
     const a = e.target.closest('[data-a]');
@@ -200,7 +201,16 @@
     const act = a.dataset.a;
     if (act === 'restart') reset();
     if (act === 'cart') { openCart = !openCart; render(); }
-    if (act === 'checkout') { screen = 'pay'; openCart = false; render(); }
+    if (act === 'checkout') {
+      const gone = lines.filter((l) => S().avail[l.pid] === false);
+      if (gone.length) { // صنف نفد وهو في السلة
+        lines = lines.filter((l) => S().avail[l.pid] !== false);
+        D.toast('نفد صنف من طلبك', gone.map((l) => D.prod(l.pid).ar).join('، ') + ' — تمت إزالته', { warn: 1, ic: 'alert', ms: 5000 });
+        if (!lines.length) openCart = false;
+        render(); return;
+      }
+      screen = 'pay'; openCart = false; render();
+    }
     if (act === 'back') { screen = 'menu'; render(); }
     if (act === 'pay') { screen = 'pay'; render(); }
     if (act === 'new') reset();
@@ -222,7 +232,7 @@
   // (بس لو حاجة تخص الكشك اتغيّرت، عشان السكرول ميرجعش لفوق مع كل طلب في المحل)
   const sig = () => JSON.stringify([S().avail, S().prices, cfg(), online(), D.TRAIN]);
   let lastSig = '';
-  const maybe = () => { const s = sig(); if (s === lastSig || busy) return; lastSig = s; if (screen === 'menu' || screen === 'hello') render(); else if (screen === 'pay' && !online()) render(); };
+  const maybe = () => { const s = sig(); if (s === lastSig || busy) return; lastSig = s; if (!cfg().on && (screen === 'menu' || screen === 'pay')) { reset(); return; } if (screen === 'menu' || screen === 'hello') render(); else if (screen === 'pay' && !online()) render(); };
   D.on((why) => { if (why !== 'cart') maybe(); });
   L.on(maybe);
   lastSig = sig();

@@ -119,12 +119,13 @@
       el.querySelectorAll('[data-t]').forEach((n) => { const o = S.orders.find((x) => x.id === n.dataset.t); if (o) n.textContent = D.mmss(age(o, at, now)); });
     }, 1000);
     const slow = setInterval(draw, 15000);
+    const loop = opt.sound === false ? 0 : D.alertLoop(() => { const S = D.state(); const now = Date.now(); return S.orders.some((o) => o.status === 'prep' && D.forStation(S, o, at) && D.stStage(o, at, now) === 'new'); });
     draw();
     return {
       setLang(l) { lang = l; draw(); },
       setSt(s) { at = s; seen = new Set(); first = true; draw(); },
       get st() { return at; },
-      destroy() { off(); clearInterval(timer); clearInterval(slow); },
+      destroy() { off(); clearInterval(timer); clearInterval(slow); clearInterval(loop); },
     };
   };
 })();

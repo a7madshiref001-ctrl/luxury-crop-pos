@@ -560,7 +560,12 @@
   D.on = (fn) => { subs.add(fn); return () => subs.delete(fn); };
   const emit = (why) => subs.forEach((fn) => { try { fn(why); } catch (e) { console.error(e); } });
   function read() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
-  function write(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { /* التخزين ممكن يبقى مقفول — الديمو يكمل في الذاكرة */ } }
+  let storageWarned = 0;
+  function write(s) {
+    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { // التخزين ممكن يبقى مقفول — الديمو يكمل في الذاكرة، والنسخة الحقيقية لازم تنبّه
+      if (D.REAL && D.toast && Date.now() - storageWarned > 60000) { storageWarned = Date.now(); D.toast('تعذّر حفظ البيانات على الجهاز', 'نزّل نسخة احتياطية من الإعدادات وراجع مساحة المتصفح', { warn: 1, ic: 'alert', ms: 9000 }); }
+    }
+  }
   function emptyLive(now) {
     return { v: 1, live: 1, day: D.dayKey(now), created: now, seq: { inv: 0, no: 0, cn: 0, z: 0, po: 0 },
       orders: [], holds: [], shifts: [], payouts: [], log: [], waste: [], receipts: [], counts: [], feed: [], pendingRemote: [],
@@ -827,6 +832,12 @@
     const all = D.refundable(o).every((x) => x === 0);
     if (all && (o.status === 'prep' || o.status === 'ready')) { o.status = 'cancelled'; o.tsDone = now; if (D.hooks.status && o.ext) D.hooks.status(o, 'cancelled'); }
     if (all) o.cancelled = 1;
+    // لو الجزء اللي رجع كان آخر حاجة الطلب مستنيها، الطلب مايفضلش واقف
+    if (!all && o.status === 'prep') {
+      const rest = D.stationsOf(s, o);
+      if (!rest.length) { o.status = 'done'; o.tsReady = o.tsReady || now; o.tsDone = now; }
+      else if (rest.every((x) => o.sp && o.sp[x] && o.sp[x].ready)) { o.status = 'ready'; o.tsReady = now; if (D.hooks.status && o.ext) D.hooks.status(o, 'ready'); }
+    }
     // الولاء: الأختام بتتشال، والهدية بترجع لو المشروب الهدية رجع
     if (o.cust) {
       const cu = s.customers.find((x) => x.id === o.cust);
@@ -1166,14 +1177,88 @@
   });
 
   /* ---------- sound ---------- */
-  let AC = null;
-  const unlock = () => { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } } if (AC && AC.state === 'suspended') AC.resume(); };
-  ['pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, unlock, { passive: true }));
+  let AC = null, OUT = null, bellBuf = null, bellP = null, playing = [], primed = false;
+  const BELL_URL = 'assets/audio/order-up-bell.mp3';
+  // نغمات الطلب الجديد — بتتغيّر من Settings، وكل نغمة ليها زرار تجربة
+  D.TONES = [
+    { id: 'bell', en: 'Order bell', ar: 'جرس الطلب', sub: 'نفس جرس المنيو — واضح وطويل', secs: 3.95 },
+    { id: 'service', en: 'Counter bell', ar: 'جرس الكاونتر', sub: 'ضربتين حادتين', secs: 1.55 },
+    { id: 'doorbell', en: 'Ding dong', ar: 'دينج دونج', sub: 'نغمتين طويلتين', secs: 2.3 },
+    { id: 'chime', en: 'Soft chime', ar: 'نغمة هادية', sub: 'لطيفة وقصيرة', secs: .55 },
+    { id: 'rise', en: 'Rising', ar: 'نغمة صاعدة', sub: 'أربع نغمات واضحة', secs: .98 },
+    { id: 'triple', en: 'Triple beep', ar: 'ثلاث نبضات', sub: 'قوية وسريعة', secs: .85 },
+    { id: 'ring', en: 'Long ring', ar: 'رنين طويل', sub: 'زي رنة التليفون', secs: 3.1 },
+    { id: 'alarm', en: 'Loud alarm', ar: 'إنذار عالي', sub: 'للأماكن الصاخبة والزحمة', secs: 2.56 },
+  ];
+  D.TONE_VOLS = [[1, 'Normal', 'عادي'], [2, 'Loud', 'عالي'], [3, 'Max', 'أقصى صوت']];
+  D.TONE_REPS = [[1, 'Once', 'مرة'], [2, 'Twice', 'مرتين'], [3, '3 times', '3 مرات'], [0, 'Until seen', 'لحد الرد']];
+  const VOLS = { 1: .55, 2: 1, 3: 1.7 };
+  const resume = () => { try { const p = AC.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* */ } };
+  const needAC = () => {
+    if (AC) return AC;
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; return null; }
+    // ضاغط صغير: بيرفع الأصوات الواطية من غير ما تقطّع
+    const c = AC.createDynamicsCompressor(); c.threshold.value = -20; c.knee.value = 12; c.ratio.value = 10; c.attack.value = .003; c.release.value = .2;
+    c.connect(AC.destination); OUT = c;
+    return AC;
+  };
+  const loadBell = () => {
+    if (bellBuf) return Promise.resolve(bellBuf);
+    if (bellP) return bellP;
+    if (!needAC()) return Promise.reject(new Error('audio'));
+    bellP = fetch(BELL_URL).then((r) => { if (!r.ok) throw new Error('bell'); return r.arrayBuffer(); })
+      .then((d) => new Promise((res, rej) => AC.decodeAudioData(d, res, rej)))
+      .then((b) => { bellBuf = b; return b; })
+      .catch((e) => { bellP = null; throw e; });
+    return bellP;
+  };
+  const unlock = () => {
+    if (!needAC()) return;
+    if (AC.state !== 'running') resume();
+    if (!primed) {
+      primed = true;
+      try { const s = AC.createBufferSource(); s.buffer = AC.createBuffer(1, 1, 22050); s.connect(AC.destination); s.start(0); } catch (e) { /* */ }
+      loadBell().catch(() => {});
+    }
+  };
+  ['pointerdown', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, unlock, { passive: true }));
   // صوت كل شاشة على حدة (الباريستا ممكن يكتم شاشته من غير ما يكتم الكاشير)
   D.devMute = (on) => { try { if (on == null) return localStorage.getItem(BASE + ':mute:' + location.pathname.split('/').pop() + location.search) === '1'; localStorage.setItem(BASE + ':mute:' + location.pathname.split('/').pop() + location.search, on ? '1' : '0'); } catch (e) { /* */ } return !!on; };
+  const osc = (out, t, f, dur, gain, type, at) => {
+    const o = AC.createOscillator(); const g = AC.createGain();
+    o.type = type || 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + (at || .006)); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + .02); playing.push(o);
+  };
+  const SYNTH = {
+    service: (out, t) => [0, .42].forEach((d) => [[2093, .55, 1.1], [4190, .18, .7], [5780, .22, .5], [11300, .06, .25]].forEach(([f, g, len]) => osc(out, t + d, f, len, g))),
+    doorbell: (out, t) => [[659.25, 0, 1.3], [523.25, .6, 1.7]].forEach(([f, d, len]) => { osc(out, t + d, f, len, .7, 'triangle'); osc(out, t + d, f * 2, len * .6, .18); }),
+    chime: (out, t) => [[880, 0], [1320, .12]].forEach(([f, d]) => osc(out, t + d, f, .42, .4)),
+    rise: (out, t) => [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => osc(out, t + i * .16, f, .5, .65, 'triangle')),
+    triple: (out, t) => [0, .3, .6].forEach((d) => osc(out, t + d, 1046.5, .24, .6, 'square')),
+    ring: (out, t) => [0, 1.7].forEach((d) => { for (let i = 0; i < 28; i++) osc(out, t + d + i * .05, i % 2 ? 1250 : 1000, .05, .55, 'square', .003); }),
+    alarm: (out, t) => { for (let i = 0; i < 8; i++) osc(out, t + i * .32, i % 2 ? 770 : 960, .3, .7, 'sawtooth', .01); },
+  };
+  D.playTone = (id, vol, times) => {
+    if (!needAC()) return;
+    if (AC.state !== 'running') resume();
+    playing.forEach((n) => { try { n.stop(); } catch (e) { /* */ } }); playing = [];
+    const m = D.TONES.find((t) => t.id === id) || D.TONES[0];
+    const n = Math.max(1, times || 1);
+    const out = AC.createGain(); out.gain.value = VOLS[vol] || 1; out.connect(OUT);
+    const at = (i) => AC.currentTime + .03 + i * (m.secs + .4);
+    if (m.id === 'bell') {
+      loadBell().then((b) => { for (let i = 0; i < n; i++) { const s = AC.createBufferSource(); s.buffer = b; s.connect(out); s.start(at(i)); playing.push(s); } })
+        .catch(() => { for (let i = 0; i < n; i++) SYNTH.service(out, at(i)); });
+      return;
+    }
+    for (let i = 0; i < n; i++) SYNTH[m.id](out, at(i));
+  };
   D.sound = (kind) => {
     if (!AC || (S && S.settings && !S.settings.sound) || D.devMute()) return;
-    const notes = { new: [[880, 0], [1320, .12]], ready: [[660, 0], [990, .1], [1320, .2]], beep: [[1900, 0]], ok: [[740, 0], [1110, .09]], err: [[220, 0]] }[kind] || [[880, 0]];
+    if (AC.state !== 'running') resume();
+    if (kind === 'new') { const st = (S && S.settings) || {}; D.playTone(st.orderTone || 'bell', st.orderVol || 2, st.orderRepeat == null ? 1 : st.orderRepeat || 1); return; }
+    const notes = { ready: [[660, 0], [990, .1], [1320, .2]], beep: [[1900, 0]], ok: [[740, 0], [1110, .09]], err: [[220, 0]] }[kind] || [[880, 0]];
     notes.forEach(([f, d]) => {
       const o = AC.createOscillator(); const g = AC.createGain();
       o.type = kind === 'beep' ? 'square' : 'sine'; o.frequency.value = f;
@@ -1182,6 +1267,20 @@
       o.connect(g); g.connect(AC.destination); o.start(t0); o.stop(t0 + .4);
     });
   };
+  // «لحد الرد»: الصوت بيتعاد كل 15 ثانية طول ما فيه طلب مستني
+  D.alertLoop = (pending) => setInterval(() => { const st = S && S.settings; if (st && st.orderRepeat === 0 && pending()) D.sound('new'); }, 15000);
+  // المتصفح مش بيشغّل صوت قبل أول ضغطة، فشاشات المطبخ والباريستا لازم تتضغط مرة بعد الفتح
+  function soundGate() {
+    if (['kiosk', 'board', 'cart'].includes(window.DARJ_ROLE)) return;
+    let el = null;
+    const tick = () => {
+      const want = !!(S && S.settings && S.settings.sound) && !D.devMute() && !(AC && AC.state === 'running');
+      if (want && !el) { el = document.createElement('button'); el.type = 'button'; el.className = 'snd-gate'; el.innerHTML = `${D.icon('volume')}<span class="bi"><b>Tap to enable sound</b><small>اضغط هنا مرة عشان صوت الطلبات يشتغل</small></span>`; document.body.appendChild(el); }
+      if (!want && el) { el.remove(); el = null; }
+    };
+    ['pointerdown', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, () => setTimeout(tick, 150), { passive: true }));
+    setTimeout(tick, 1000); setInterval(tick, 4000);
+  }
   D.drawerPop = (txt) => {
     const el = document.createElement('div');
     el.className = 'drawer-pop';
@@ -1199,6 +1298,7 @@
   /* ---------- live loop ---------- */
   D.startLive = () => {
     D.load();
+    soundGate();
     if (D.SAT) return;
     setInterval(D.tick, 3000); setTimeout(D.tick, 1500);
     if (D.REAL) {

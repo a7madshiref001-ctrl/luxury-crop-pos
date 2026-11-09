@@ -369,7 +369,7 @@
       <div class="sell__left">
         <div class="sell__bar">
           <label class="search"><span>${I('search')}</span><input class="input" id="q" placeholder="${tr('ابحث بالاسم أو امسح الباركود', 'Search or scan')}" value="${esc(q)}" autocomplete="off"><kbd>F2</kbd></label>
-          <button class="btn btn--ghost btn--icon" id="scan" title="امسح باركود (تجربة)">${I('scan')}</button>
+          ${D.LIVE ? '' : `<button class="btn btn--ghost btn--icon" id="scan" title="امسح باركود (تجربة)">${I('scan')}</button>`}
           <div class="seg" id="lang"><button data-l="ar" class="${lang === 'ar' ? 'on' : ''}">ع</button><button data-l="en" class="${lang === 'en' ? 'on' : ''}">EN</button></div>
           <button class="btn btn--ghost" id="rfnd" title="مرتجع أو إلغاء طلب">${I('refund', 'sm')}${bi('Refund', 'مرتجع')}</button>
           <button class="btn btn--ghost btn--icon" id="more" title="أوامر الكاشير">${I('drawer')}</button>
@@ -393,7 +393,7 @@
     $('#cats').addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (!b) return; cat = b.dataset.c; $$('#cats .chip').forEach((x) => x.classList.toggle('on', x === b)); drawItems(); });
     $('#items').addEventListener('click', (e) => { const b = e.target.closest('[data-p]'); if (b) pick(b.dataset.p, b); });
     $('#lang').addEventListener('click', (e) => { const b = e.target.closest('[data-l]'); if (!b) return; lang = b.dataset.l; renderSell(view); });
-    $('#scan').addEventListener('click', () => { const beans = D.PRODUCTS.filter((p) => p.code); scanned(beans[Math.floor(Math.random() * beans.length)]); });
+    if ($('#scan')) $('#scan').addEventListener('click', () => { const beans = D.PRODUCTS.filter((p) => p.code); if (beans.length) scanned(beans[Math.floor(Math.random() * beans.length)]); });
     $('#more').addEventListener('click', moreMenu);
     $('#rfnd').addEventListener('click', openFindOrder);
     $('#fab').addEventListener('click', () => openCartSheet(true));
@@ -838,9 +838,9 @@
           <div style="margin-top:8px">${z.fields.map((f) => `<div><code>${f.tag}</code><span>${['', 'اسم البائع', 'الرقم الضريبي', 'وقت الفاتورة', 'الإجمالي مع الضريبة', 'مبلغ الضريبة'][f.tag]}</span><code>${esc(f.v)}</code></div>`).join('')}</div>
           <p class="muted" style="margin-top:8px;font-size:11.5px">هذه الحقول مرمّزة بصيغة TLV ثم Base64 كما تطلب الهيئة. الربط مع منصة «فاتورة» (المرحلة الثانية) يُفعَّل عند التشغيل الفعلي.</p></details>` : ''}
       </div>
-      <div class="modal__f">${fresh && D.canRefund(o) ? `<button class="btn btn--danger" id="cx" style="flex:0 0 auto">${I('refund', 'sm')}${bi('Cancel', 'إلغاء الطلب')}</button>` : ''}<button class="btn btn--ghost" id="pr">${I('print', 'sm')}${bi('Print', 'اطبع')}</button><button class="btn btn--ghost" id="wa">${I('send', 'sm')}${bi('Send', 'للعميل')}</button>${fresh ? `<button class="btn btn--ink" data-close>${bi('New order', 'طلب جديد')}</button>` : ''}</div>`);
+      <div class="modal__f">${fresh && D.canRefund(o) ? `<button class="btn btn--danger" id="cx" style="flex:0 0 auto">${I('refund', 'sm')}${bi('Cancel', 'إلغاء الطلب')}</button>` : ''}<button class="btn btn--ghost" id="pr">${I('print', 'sm')}${bi('Print', 'اطبع')}</button>${D.LIVE ? '' : `<button class="btn btn--ghost" id="wa">${I('send', 'sm')}${bi('Send', 'للعميل')}</button>`}${fresh ? `<button class="btn btn--ink" data-close>${bi('New order', 'طلب جديد')}</button>` : ''}</div>`);
     $('#pr', m).addEventListener('click', () => D.print(D.receiptHTML(o, { copy: !fresh })));
-    $('#wa', m).addEventListener('click', () => D.toast('أُرسلت الفاتورة (تجربة)', 'في التشغيل الفعلي تُرسل للعميل برسالة SMS أو واتساب مع رابط الفاتورة', { ic: 'send' }));
+    if ($('#wa', m)) $('#wa', m).addEventListener('click', () => D.toast('أُرسلت الفاتورة (تجربة)', 'في التشغيل الفعلي تُرسل للعميل برسالة SMS أو واتساب مع رابط الفاتورة', { ic: 'send' }));
     if ($('#cx', m)) $('#cx', m).addEventListener('click', () => { m.close(); openRefund(o.id, { all: true, reason: 'mind' }); });
   }
 
@@ -928,12 +928,13 @@
     $('#ok', m).addEventListener('click', () => { D.setStatus(id, 'rejected'); D.mutate(() => D.log(me, 'void', `إلغاء طلب كشك غير مدفوع #${o.no} — ${fmt(o.total)} ر.س`, null, 'warn'), 'reject'); m.close(); D.toast('تم إلغاء الطلب', `#${o.no}`, { ic: 'x' }); });
   }
   function rejectOnline(id) {
-    const m = D.modal(`${D.head(bi('Reject order', 'رفض الطلب'), 'يُعاد المبلغ للعميل أونلاين تلقائيًا، ويصله إشعار بذلك')}
+    const o0 = S().orders.find((x) => x.id === id); const unpaid0 = !!(o0 && o0.unpaid);
+    const m = D.modal(`${D.head(bi('Reject order', 'رفض الطلب'), unpaid0 ? 'العميل لم يدفع بعد، فلا يوجد مبلغ للاسترجاع' : 'يُعاد المبلغ للعميل أونلاين تلقائيًا، ويصله إشعار بذلك')}
       <div class="modal__b"><div class="picks">${[['Sold out', 'صنف نفد', 'box'], ['Too busy', 'الفرع مزدحم', 'clock'], ['Duplicate', 'طلب مكرر', 'orders']].map(([en, ar, ic], i) => `<button class="pickc${i ? '' : ' on'}" data-rr="${ar}">${I(ic)}${bi(en, ar)}</button>`).join('')}</div></div>
-      <div class="modal__f"><button class="btn btn--ghost" data-close>${bi('Back', 'رجوع')}</button><button class="btn btn--danger" id="ok">${bi('Reject & refund', 'رفض واسترجاع المبلغ')}</button></div>`, { cls: 'modal--sm' });
+      <div class="modal__f"><button class="btn btn--ghost" data-close>${bi('Back', 'رجوع')}</button><button class="btn btn--danger" id="ok">${unpaid0 ? bi('Reject order', 'رفض الطلب') : bi('Reject & refund', 'رفض واسترجاع المبلغ')}</button></div>`, { cls: 'modal--sm' });
     let why = 'صنف نفد';
     m.addEventListener('click', (e) => { const b = e.target.closest('[data-rr]'); if (!b) return; why = b.dataset.rr; $$('[data-rr]', m).forEach((x) => x.classList.toggle('on', x === b)); });
-    $('#ok', m).addEventListener('click', () => { D.setStatus(id, 'rejected'); D.mutate((s) => { const o = s.orders.find((x) => x.id === id); o.refunded = o.total; o.refunds = [{ cn: 'CN-' + (++s.seq.cn), ts: Date.now(), a: o.total, vat: o.vat, parts: [{ m: 'online', a: o.total }], m: 'online', lines: o.lines.map((l, i) => ({ i, q: l.qty })), by: me, reason: why }]; D.log(me, 'refund', `رفض طلب أونلاين #${o.no} — ${why} — استرجاع ${fmt(o.total)} ر.س`, null, 'warn'); }, 'reject'); m.close(); D.toast('تم رفض الطلب', 'المبلغ يرجع للعميل أونلاين', { ic: 'refund' }); });
+    $('#ok', m).addEventListener('click', () => { if (unpaid0) { D.setStatus(id, 'rejected'); D.mutate(() => D.log(me, 'void', `رفض طلب غير مدفوع #${o0.no} — ${why}`, null, 'warn'), 'reject'); m.close(); D.toast('تم رفض الطلب', 'لم يدفع العميل، فلا يوجد استرجاع', { ic: 'x' }); return; } D.setStatus(id, 'rejected'); D.mutate((s) => { const o = s.orders.find((x) => x.id === id); o.refunded = o.total; o.refunds = [{ cn: 'CN-' + (++s.seq.cn), ts: Date.now(), a: o.total, vat: o.vat, parts: [{ m: 'online', a: o.total }], m: 'online', lines: o.lines.map((l, i) => ({ i, q: l.qty })), by: me, reason: why }]; D.log(me, 'refund', `رفض طلب أونلاين #${o.no} — ${why} — استرجاع ${fmt(o.total)} ر.س`, null, 'warn'); }, 'reject'); m.close(); D.toast('تم رفض الطلب', 'المبلغ يرجع للعميل أونلاين', { ic: 'refund' }); });
   }
   function orderDetail(id) {
     const s = S(); const o = s.orders.find((x) => x.id === id); if (!o) return;
@@ -966,8 +967,8 @@
     { id: 'late', en: 'Too slow', ar: 'تأخر الطلب', ic: 'clock' },
   ];
   function openFindOrder() {
-    const m = D.modal(`${D.head(bi('Refund', 'مرتجع — ابحث عن الطلب'), 'برقم الفاتورة أو رقم الطلب أو جوال العميل، أو امسح QR الفاتورة')}
-      <div class="modal__b"><div style="display:flex;gap:8px"><label class="search" style="flex:1;min-width:0"><span>${I('search')}</span><input class="input" id="fq" placeholder="INV-… · #… · 05…" autocomplete="off"></label><button class="btn btn--ghost" id="fscan">${I('scan', 'sm')}${bi('Scan', 'امسح')}</button></div>
+    const m = D.modal(`${D.head(bi('Refund', 'مرتجع — ابحث عن الطلب'), D.LIVE ? 'برقم الفاتورة أو رقم الطلب أو جوال العميل' : 'برقم الفاتورة أو رقم الطلب أو جوال العميل، أو امسح QR الفاتورة')}
+      <div class="modal__b"><div style="display:flex;gap:8px"><label class="search" style="flex:1;min-width:0"><span>${I('search')}</span><input class="input" id="fq" placeholder="INV-… · #… · 05…" autocomplete="off"></label>${D.LIVE ? '' : `<button class="btn btn--ghost" id="fscan">${I('scan', 'sm')}${bi('Scan', 'امسح')}</button>`}</div>
       <div class="wz-h" style="margin-top:14px"><span class="term-en">Recent</span><span class="muted">آخر الطلبات</span></div><div id="fl" class="grid" style="gap:8px"></div></div>`);
     const draw = () => {
       const k = $('#fq', m).value.trim().replace('#', '');
@@ -977,7 +978,7 @@
     };
     draw();
     $('#fq', m).addEventListener('input', draw);
-    $('#fscan', m).addEventListener('click', () => { const o = S().orders.filter((x) => x.reg === 1 && D.canRefund(x)).slice(-1)[0]; if (!o) return; D.sound('beep'); D.toast('تمت قراءة QR الفاتورة', o.inv, { ic: 'scan', ms: 2000 }); m.close(); openRefund(o.id); });
+    if ($('#fscan', m)) $('#fscan', m).addEventListener('click', () => { const o = S().orders.filter((x) => x.reg === 1 && D.canRefund(x)).slice(-1)[0]; if (!o) return; D.sound('beep'); D.toast('تمت قراءة QR الفاتورة', o.inv, { ic: 'scan', ms: 2000 }); m.close(); openRefund(o.id); });
     m.addEventListener('click', (e) => { const b = e.target.closest('[data-fo]'); if (!b) return; const o = S().orders.find((x) => x.id === b.dataset.fo); if (!D.canRefund(o)) { D.toast('لا يوجد ما يُرجع من هذا الطلب', `${o.inv} — مرتجع بالكامل`, { warn: 1 }); return; } m.close(); openRefund(o.id); });
     setTimeout(() => $('#fq', m).focus(), 60);
   }
@@ -1025,7 +1026,7 @@
         body = `<div class="wz-h"><span class="term-en">Refund to</span><span class="muted">${online ? 'طلب أونلاين — المبلغ يرجع لبطاقة العميل' : 'كيف ترجع الفلوس للعميل؟'}</span></div>
           <div class="picks">${opts.map((x) => `<button class="pickc${how === x.id ? ' on' : ''}" data-how="${x.id}" ${x.off ? 'disabled' : ''}>${I(x.ic)}${bi(x.en, x.ar)}<span class="sub">${esc(x.sub)}</span></button>`).join('')}</div>
           ${sumBox}
-          <div class="blind" style="margin-top:12px">${I('shield', 'sm')}<span>${D.can(me, 'refund') === 1 ? 'لديك صلاحية المرتجع — يُسجَّل باسمك.' : 'المرتجع يحتاج PIN المشرف أو المدير (للتجربة: 2222).'} ويصدر ${D.noteName().ar} برقم تسلسلي.</span></div>`;
+          <div class="blind" style="margin-top:12px">${I('shield', 'sm')}<span>${D.can(me, 'refund') === 1 ? 'لديك صلاحية المرتجع — يُسجَّل باسمك.' : (D.REAL ? 'المرتجع يحتاج PIN المشرف أو المدير.' : 'المرتجع يحتاج PIN المشرف أو المدير (للتجربة: 2222).')} ويصدر ${D.noteName().ar} برقم تسلسلي.</span></div>`;
         foot = `<button class="btn btn--ghost" id="wzBack">${bi('Back', 'السابق')}</button><button class="btn btn--danger btn--lg" id="wzGo">${I('refund', 'sm')}${bi('Refund ' + fmt(q.a), 'تنفيذ المرتجع')}</button>`;
       }
       $('#wb', m).innerHTML = `<div class="wz">${body}</div>`;
@@ -1398,7 +1399,7 @@
     const m = D.modal(`${D.head('اقتراح طلب شراء', 'محسوب من حد الطلب لكل صنف ومعدّل الاستهلاك')}
       <div class="modal__b">${Object.keys(by).length ? Object.entries(by).map(([sid, items]) => `<div class="card" style="padding:14px;margin-bottom:10px"><div class="card__h" style="margin-bottom:6px"><h3>${esc(D.sup(sid).ar)}</h3><span class="pill">${esc(D.sup(sid).terms)}</span></div>
         ${items.map((i) => `<div class="rc-kv" style="padding:4px 0"><span>${esc(i.ar)} <small class="muted">(موجود ${qtyTxt(i.id, s.stock[i.id])})</small></span><b class="num">${qtyTxt(i.id, i.buy)} · ${fmt(i.buy * i.cost)}</b></div>`).join('')}</div>`).join('') : '<div class="empty">كل الأصناف أعلى من حد الطلب</div>'}</div>
-      <div class="modal__f"><button class="btn btn--ghost" data-close>إغلاق</button>${Object.keys(by).length ? `<button class="btn btn--ink" id="snd">${I('send', 'sm')} إرسال للموردين</button>` : ''}</div>`);
+      <div class="modal__f"><button class="btn btn--ghost" data-close>إغلاق</button>${Object.keys(by).length && !D.LIVE ? `<button class="btn btn--ink" id="snd">${I('send', 'sm')} إرسال للموردين</button>` : ''}</div>`);
     if ($('#snd', m)) $('#snd', m).addEventListener('click', () => { m.close(); D.toast('تم تجهيز طلبات الشراء (تجربة)', 'في التشغيل الفعلي تُرسل لكل مورّد عبر واتساب أو البريد', { ic: 'send' }); });
   }
 
@@ -1831,13 +1832,28 @@
     const before = peersOf(sc).map((p) => p.dev);
     const off = L.on(() => { if (!m.isConnected) { off(); return; } if (peersOf(sc).some((p) => !before.includes(p.dev))) { off(); D.sound('ok'); D.toast(`تم ربط ${sc.ar}`, 'ستصلها الطلبات لحظة بلحظة', { ic: 'link' }); m.close(); } });
   }
-  const prepCards = () => routesCard() + kioskCard() + devicesCard();
+  function soundCard() {
+    const st = S().settings; const cur = st.orderTone || 'bell', vol = st.orderVol || 2, rep = st.orderRepeat == null ? 1 : st.orderRepeat;
+    return `<div class="card"><div class="card__h"><h3><span class="label">Order sound</span>صوت الطلبات الجديدة</h3></div>
+      <div class="tones">${D.TONES.map((t) => `<div class="tone${t.id === cur ? ' on' : ''}"><button class="tone__pick" data-tone="${t.id}">${I(t.id === cur ? 'check' : 'bell', 'sm')}<span class="bi"><b>${t.en}</b><small>${t.ar}</small></span><small class="t">${t.sub}</small></button><button class="tone__play" data-play="${t.id}" aria-label="جرّب ${t.ar}" title="جرّب">${I('play', 'sm')}</button></div>`).join('')}</div>
+      <div class="set-row"><span><b>علو الصوت</b><small>لو لسه واطي، ارفع صوت الجهاز نفسه كمان</small></span><div class="seg" id="tvol">${D.TONE_VOLS.map(([v, en, ar]) => `<button data-v="${v}" class="${vol === v ? 'on' : ''}">${bi(en, ar)}</button>`).join('')}</div></div>
+      <div class="set-row"><span><b>عدد المرات</b><small>«لحد الرد» بيعيد الصوت كل 15 ثانية لحد ما الطلب يتقبل أو يبدأ تحضيره</small></span><div class="seg" id="trep">${D.TONE_REPS.map(([v, en, ar]) => `<button data-v="${v}" class="${rep === v ? 'on' : ''}">${bi(en, ar)}</button>`).join('')}</div></div>
+      <button class="btn btn--ghost btn--block" id="ttest" style="margin-top:10px">${I('volume', 'sm')}${bi('Test new-order sound', 'جرّب صوت طلب جديد')}</button></div>`;
+  }
+  const prepCards = () => soundCard() + routesCard() + kioskCard() + devicesCard();
   function wireDevices(root) {
     root.querySelectorAll('#devCard [data-pair], [data-pair="kiosk"]').forEach((b) => { if (b._w) return; b._w = 1; b.addEventListener('click', () => pairModal(b.dataset.pair)); });
     const rot = root.querySelector('#lnkRot');
     if (rot && !rot._w) { rot._w = 1; rot.addEventListener('click', async () => { const u = await D.approve('settings', 'إلغاء ربط كل الشاشات', me); if (!u) return; LNK().rotate(); D.toast('تم إلغاء ربط كل الشاشات', 'اربط كل شاشة من جديد عبر Pair', { ic: 'link' }); }); }
   }
   function wirePrep(view, again) {
+    const setSnd = (k, v, msg) => { D.mutate((st) => { st.settings[k] = v; D.log(me, 'settings', msg); }, 'set'); };
+    const previewNow = () => { const st = S().settings; D.playTone(st.orderTone || 'bell', st.orderVol || 2, 1); };
+    view.querySelectorAll('[data-tone]').forEach((b) => b.addEventListener('click', () => { const t = D.TONES.find((x) => x.id === b.dataset.tone); setSnd('orderTone', t.id, `صوت الطلبات: ${t.ar}`); previewNow(); again(); }));
+    view.querySelectorAll('[data-play]').forEach((b) => b.addEventListener('click', () => D.playTone(b.dataset.play, S().settings.orderVol || 2, 1)));
+    const tv = view.querySelector('#tvol'); if (tv) tv.addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; setSnd('orderVol', +b.dataset.v, `علو صوت الطلبات: ${b.innerText.replace(/\s+/g, ' ')}`); previewNow(); again(); });
+    const tr = view.querySelector('#trep'); if (tr) tr.addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; setSnd('orderRepeat', +b.dataset.v, `تكرار صوت الطلبات: ${b.innerText.replace(/\s+/g, ' ')}`); again(); });
+    const tt = view.querySelector('#ttest'); if (tt) tt.addEventListener('click', () => { const st = S().settings; D.playTone(st.orderTone || 'bell', st.orderVol || 2, st.orderRepeat || 1); });
     view.querySelectorAll('[data-rto]').forEach((b) => b.addEventListener('click', () => { rtOpen = rtOpen === b.dataset.rto ? '' : b.dataset.rto; again(); }));
     view.querySelectorAll('[data-rtcat] [data-rc]').forEach((b) => b.addEventListener('click', () => {
       const cat = b.closest('[data-rtcat]').dataset.rtcat; const r = b.dataset.rc;
@@ -2108,9 +2124,13 @@
   function boot() {
     D.startLive();
     D.state().orders.forEach((o) => { if (o.status === 'new') seenNew.add(o.id); });
+    // الصلاحيات لازم تتراجع حتى لو الصفحة اتفتحت على لينك مباشر
+    if (!VIEWS[route] || !ROUTES.some((x) => x.id === route)) route = 'sell';
+    if (me && D.STAFF.some((u) => u.id === me) && !can(ROUTES.find((x) => x.id === route).perm)) route = D.staff(me).role === 'barista' ? 'kds' : 'sell';
     shell();
     D.on(onChange);
     setInterval(() => { if (me) chrome(); }, 30000);
+    D.alertLoop(() => !!me && S().orders.some((o) => o.status === 'new'));
     if (!me || (D.REAL && !S().setup) || (me && !D.STAFF.some((u) => u.id === me))) { me = null; render(); lockScreen(); } else { render(); if (wantGuide && !D.REAL) setTimeout(openGuide, 700); }
     window.addEventListener('hashchange', () => { const r = location.hash.slice(1); if (r !== route && VIEWS[r]) { const rr = ROUTES.find((x) => x.id === r); if (can(rr.perm)) { route = r; render(); } } });
   }
