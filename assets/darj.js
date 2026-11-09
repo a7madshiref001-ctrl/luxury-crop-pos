@@ -119,7 +119,9 @@
     { id: 'bcol', cat: 'beans', ar: 'كولومبيا هويلا 250جم', en: 'Colombia Huila 250g', price: 72, pop: .5, mods: [], r: { 'bag-col': 1 }, code: '6287001200021' },
     { id: 'bhouse', cat: 'beans', ar: 'هاوس إسبريسو 1كجم', en: 'House Espresso 1kg', price: 185, pop: .3, mods: [], r: { 'bag-house': 1 }, code: '6287001200038' },
   ];
-  D.prod = (id) => D.PRODUCTS.find((p) => p.id === id);
+  // صنف اتضاف في الموقع بعد آخر تحديث لمنيو الكاشير: بيظهر في الطلب باسمه كملاحظة، ومش موجود في شاشة البيع
+  D.SITE_ITEM = { id: 'site_item', cat: '_site', ar: 'صنف من الموقع', online: 'صنف من الموقع', en: 'Website item', price: 0, drink: true, station: 'bar', mods: [], r: {}, pop: 0 };
+  D.prod = (id) => D.PRODUCTS.find((p) => p.id === id) || (id === 'site_item' ? D.SITE_ITEM : undefined);
   D.isDrink = (p) => (p.drink != null ? !!p.drink : !['sweet', 'beans'].includes(p.cat) && p.id !== 'water');
   D.PIMG = D.PIMG || {}; // id → true لما الصورة تكون موجودة في assets/img/p/ (بيتملى من img.js)
   D.img = (p) => p.img || (D.PIMG[p.id] ? `assets/img/p/${p.id}.jpg` : '');
@@ -337,7 +339,7 @@
 
   /* ---------- pricing & recipes ---------- */
   D.priceOf = (S, p) => (S && S.prices && S.prices[p.id] != null ? S.prices[p.id] : p.price);
-  D.unitPrice = (S, line) => { const p = D.prod(line.pid); return D.priceOf(S, p) + D.modList(line).reduce((a, { o }) => a + (o.d || 0), 0); };
+  D.unitPrice = (S, line) => { if (line.fixed != null) return line.fixed; const p = D.prod(line.pid); return D.priceOf(S, p) + D.modList(line).reduce((a, { o }) => a + (o.d || 0), 0); };
   D.lineGross = (S, line) => D.r2(D.unitPrice(S, line) * line.qty);
   D.lineTotal = (S, line) => D.r2(D.lineGross(S, line) * (1 - (line.disc || 0) / 100));
   D.recipe = (line) => {
@@ -640,6 +642,7 @@
   D.exVat = (p) => (D.vatOn() ? p / 1.15 : p);
   D.noteName = (o) => (D.orderVat(o) ? { ar: 'إشعار دائن', en: 'Credit note' } : { ar: 'إشعار مرتجع', en: 'Refund note' });
   D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
+  D.installState = (st) => { S = st; write(S); bind(); emit('reset'); };
   D.reset = () => { try { localStorage.removeItem(KEY); localStorage.removeItem(CART_KEY); } catch (e) { /* */ } S = D.REAL ? emptyLive(Date.now()) : seed(Date.now()); write(S); bind(); emit('reset'); };
   window.addEventListener('storage', (e) => {
     if (D.SAT) return;

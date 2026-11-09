@@ -1650,7 +1650,7 @@
         <div class="card"><div class="card__h"><h3><span class="label">Online menu</span>الربط مع المنيو الأونلاين</h3><span class="pill ${cn.enabled ? 'pill--go' : 'pill--amber'}">${cn.enabled ? 'مفعّل' : 'جاهز — غير مربوط'}</span></div>
           <div class="set-row"><span><b>نفس أكواد الأصناف</b><small>${D.PRODUCTS.filter((p) => !p.offer).length} صنف و${D.PRODUCTS.filter((p) => p.offer).length} عروض بنفس الأكواد الموجودة في المنيو الحالي</small></span><span class="pill pill--go">${I('check', 'sm')}</span></div>
           <div class="set-row"><span><b>طلبات الطاولة تنزل هنا</b><small>بتظهر في Orders، والتحصيل عند الكاشير، وحالتها بتتحدّث في المنيو</small></span><span class="pill">${cn.enabled ? 'يعمل' : 'بعد الربط'}</span></div>
-          ${cn.enabled ? `<button class="btn btn--ink btn--block" id="connect">${I('cloud', 'sm')}${bi('Sign in & connect', 'دخول حساب الإدارة وتشغيل الربط')}</button>` : '<p class="muted" style="font-size:12px;margin-top:8px">الربط متوقف عن قصد. يتفعّل يوم التشغيل بخطوة واحدة في ملف الإعدادات.</p>'}</div>
+          ${cn.enabled ? '<div id="cloudBox"></div>' : '<p class="muted" style="font-size:12px;margin-top:8px">الربط متوقف عن قصد. يتفعّل يوم التشغيل بخطوة واحدة في ملف الإعدادات.</p>'}</div>
         <div class="card"><div class="card__h"><h3><span class="label">Operations</span>طريقة التشغيل</h3></div>
           <div class="set-row"><span><b>قبول تلقائي لطلبات المنيو</b><small>تصل للباريستا مباشرة</small></span>${sw('autoAccept', s.settings.autoAccept)}</div>
           <div class="set-row"><span><b>صوت التنبيهات</b><small>طلب جديد، طلب جاهز، قارئ الباركود</small></span>${sw('sound', s.settings.sound)}</div>
@@ -1672,7 +1672,7 @@
     $('#backup', view).addEventListener('click', backup);
     $('#train', view).addEventListener('click', () => D.setTraining(true));
     $('#wipe', view).addEventListener('click', wipeAll);
-    if ($('#connect', view)) $('#connect', view).addEventListener('click', () => { if (window.DARJ_CONNECT) window.DARJ_CONNECT.open(me); });
+    if ($('#cloudBox', view) && window.DARJ_CONNECT) window.DARJ_CONNECT.panel($('#cloudBox', view), me);
     wirePrep(view, () => renderSettingsLive(view));
     $$('[data-test]', view).forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.test === 'test-print') { const o = D.today(S()).filter((x) => x.inv).slice(-1)[0]; if (o) D.print(D.receiptHTML(o, { copy: 1 })); else D.toast('لا توجد فواتير بعد', 'اطبع بعد أول عملية بيع', { warn: 1 }); }
@@ -2108,7 +2108,7 @@
     if (!me || why === 'cart') return;
     const s = S();
     let fresh = 0;
-    s.orders.forEach((o) => { if (o.status === 'new' && !seenNew.has(o.id)) { seenNew.add(o.id); if (booted) { fresh++; D.toast(`طلب جديد من ${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}`, `#${o.no} · ${o.name || 'عميل'} · ${fmt(o.total)} ر.س · ${o.unpaid ? 'الدفع عند الكاشير' : 'مدفوع'}`, { ic: D.CH[o.ch].ic, ms: 5000 }); } } });
+    s.orders.forEach((o) => { if (o.status === 'new' && !seenNew.has(o.id)) { seenNew.add(o.id); if (booted) { fresh++; D.toast(`طلب جديد من ${D.CH[o.ch].ar}${o.table ? ' ' + o.table : ''}`, `#${o.no} · ${esc(o.name || 'عميل')} · ${fmt(o.total)} ر.س · ${o.unpaid ? 'الدفع عند الكاشير' : 'مدفوع'}`, { ic: D.CH[o.ch].ic, ms: 5000 }); } } });
     booted = true;
     if (fresh) D.sound('new');
     chrome();
