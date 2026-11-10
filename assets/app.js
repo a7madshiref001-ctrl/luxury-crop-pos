@@ -478,7 +478,7 @@
     $('#closeCart').addEventListener('click', () => openCartSheet(false));
     $('#type').addEventListener('click', (e) => { const b = e.target.closest('[data-t]'); if (!b) return; if (b.dataset.t === 'table') pickTable(); else { cart.type = b.dataset.t; cart.table = null; drawCart(); } });
     if ($('#cust')) $('#cust').addEventListener('click', openCustomerPick);
-    if ($('#custX')) $('#custX').addEventListener('click', () => { cart.cust = null; cart.lines = cart.lines.filter((l) => !l.reward); drawCart(); });
+    if ($('#custX')) $('#custX').addEventListener('click', () => { setCust(null); drawCart(); });
     if ($('#redeem')) $('#redeem').addEventListener('click', redeem);
     if ($('#crX')) $('#crX').addEventListener('click', dropCredit);
     $('#hold').addEventListener('click', holdCart);
@@ -533,7 +533,7 @@
   }
   async function voidLine(i) {
     const l = cart.lines[i]; const p = D.prod(l.pid);
-    if (l.reward) { cart.lines.splice(i, 1); drawCart(); return true; }
+    if (l.reward) { cart.lines.splice(i, 1); cart.redeem = 0; drawCart(); return true; }
     const u = await D.approve('void', `حذف ${p.ar} من السلة`, me);
     if (!u) return false;
     cart.lines.splice(i, 1);
@@ -619,13 +619,15 @@
       const list = s.customers.filter((c) => !k || c.phone.includes(k) || c.name.includes(k)).sort((a, b) => b.visits - a.visits).slice(0, 7);
       $('#cres', m).innerHTML = list.map((c) => `<button class="dev" data-c="${c.id}" style="text-align:start;padding:10px;border-radius:12px;border:1px solid var(--line)"><span class="dev__i">${I('user')}</span><span class="dev__b"><b>${esc(c.name)} ${c.tag ? `<span class="pill ${c.tag === 'VIP' ? 'pill--ink' : 'pill--blue'}">${c.tag}</span>` : ''}</b><small class="mono" style="direction:ltr;display:inline-block">${c.phone.slice(0, 3)}•••${c.phone.slice(-4)}</small><small> · ${c.visits} زيارة · ${c.stamps}/${s.settings.loyalNeed} أختام${c.rewards ? ` · ${c.rewards} هدية` : ''}</small></span>${I('chev', 'sm')}</button>`).join('')
         + (/^05\d{8}$/.test(k) && !list.length ? `<div class="grid" style="gap:8px"><input class="input" id="cname" placeholder="اسم العميل (اختياري)"><button class="btn btn--ink" id="newc">${I('plus', 'sm')} ${bi('New customer · ' + k, 'تسجيل عميل جديد')}</button></div>` : '');
-      if ($('#newc', m)) $('#newc', m).addEventListener('click', () => { const nm = (($('#cname', m) || {}).value || '').trim() || 'عميل'; const id = 'c' + D.uid(); D.mutate((st) => { st.customers.push({ id, name: nm, phone: k, visits: 0, stamps: 0, spend: 0, tag: 'جديد', last: Date.now(), fav: 'span' }); }, 'cust'); cart.cust = id; m.close(); drawCart(); });
+      if ($('#newc', m)) $('#newc', m).addEventListener('click', () => { const nm = (($('#cname', m) || {}).value || '').trim() || 'عميل'; const id = 'c' + D.uid(); D.mutate((st) => { st.customers.push({ id, name: nm, phone: k, visits: 0, stamps: 0, spend: 0, tag: 'جديد', last: Date.now(), fav: null }); }, 'cust'); setCust(id); m.close(); drawCart(); });
     };
     draw();
     $('#cq', m).addEventListener('input', draw);
-    m.addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (!b) return; cart.cust = b.dataset.c; m.close(); drawCart(); D.sound('ok'); });
+    m.addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (!b) return; setCust(b.dataset.c); m.close(); drawCart(); D.sound('ok'); });
     setTimeout(() => $('#cq', m).focus(), 60);
   }
+  // الهدية بتاعة عميل بعينه: لو العميل اتغيّر، سطر الهدية يتشال
+  function setCust(id) { if (id !== cart.cust) { cart.lines = cart.lines.filter((l) => !l.reward); cart.redeem = 0; } cart.cust = id; }
   function redeem() {
     const s = S();
     let best = -1, price = 1e9;
@@ -683,6 +685,7 @@
     if (cart.lines.length) holdCart();
     D.mutate((st) => { st.holds = st.holds.filter((x) => x.id !== id); }, 'hold');
     Object.assign(cart, JSON.parse(JSON.stringify(h.cart)));
+    cart.lines = cart.lines.filter((l) => D.has(l.pid)); // صنف اتشال من المنيو والطلب معلّق
     drawCart(); drawItems();
   }
   function clearCart() { Object.assign(cart, { lines: [], disc: null, discAppr: null, type: 'takeaway', table: null, cust: null, name: '', redeem: 0, credit: null }); drawCart(); drawItems(); }
@@ -748,8 +751,8 @@
       const rem = remaining();
       $('#pst', m).innerHTML = stepper(STEPS, 0);
       if (rem <= 0.009) {
-        const back = D.r2(cart.credit.a - c.total);
-        $('#pb', m).innerHTML = `<div class="done-ok wz">${check('blue')}<b style="font-size:17px">${bi('Covered by exchange credit', 'رصيد الاستبدال يغطي الطلب')}</b>${back > 0 ? `<span class="muted">الفرق للعميل كاش</span><span class="change">${fmt(back)} ر.س</span>` : ''}<button class="btn btn--go btn--lg" id="fin" style="margin-top:8px">${bi('Complete', 'إتمام الطلب')}</button></div>`;
+        const back = crA ? D.r2(cart.credit.a - c.total) : 0;
+        $('#pb', m).innerHTML = `<div class="done-ok wz">${check('blue')}<b style="font-size:17px">${crA ? bi('Covered by exchange credit', 'رصيد الاستبدال يغطي الطلب') : bi('Nothing to pay', 'الطلب مجاني — لا يوجد مبلغ للتحصيل')}</b>${back > 0 ? `<span class="muted">الفرق للعميل كاش</span><span class="change">${fmt(back)} ر.س</span>` : ''}<button class="btn btn--go btn--lg" id="fin" style="margin-top:8px">${bi('Complete', 'إتمام الطلب')}</button></div>`;
         $('#fin', m).addEventListener('click', finish);
         return;
       }
@@ -802,7 +805,9 @@
       if (remaining() > 0.009) { method = method === 'cash' ? 'mada' : 'cash'; amount = remaining(); paint(); return; }
       finish();
     }
+    let finished = false;
     function finish() {
+      if (finished) return; finished = true;
       const cash = pays.filter((p) => p.m === 'cash');
       const tendered = cash.reduce((a, p) => a + (p.tendered || p.a), 0);
       const cashA = cash.reduce((a, p) => a + p.a, 0);
@@ -811,7 +816,7 @@
         m.close('paid'); showReceipt(o2, false, true); return;
       }
       const creditBack = cart.credit ? D.r2(Math.max(0, cart.credit.a - c.total)) : 0;
-      const o = D.placeOrder({ lines: cart.lines, disc: cart.disc, discAppr: cart.discAppr, type: cart.type, table: cart.table, cust: cart.cust, redeem: cart.redeem, name: cart.name, staff: me,
+      const o = D.placeOrder({ lines: cart.lines, disc: cart.disc, discAppr: cart.discAppr, type: cart.type, table: cart.table, cust: cart.cust, redeem: cart.lines.some((l) => l.reward) ? 1 : 0, name: cart.name, staff: me,
         pays: pays.map((p) => ({ m: p.m, a: p.a, auth: p.auth })), cash: cash.length ? { tendered: D.r2(tendered), change: D.r2(tendered - cashA) } : null,
         credit: cart.credit ? { cn: cart.credit.cn, inv: cart.credit.inv, a: cart.credit.a } : null, creditBack });
       if (creditBack) D.drawerPop('فُتح الدرج — الفرق كاش للعميل');
@@ -832,7 +837,7 @@
     const m = D.modal(`${D.head(fresh ? bi('Paid', 'تم الدفع') : bi('Invoice ' + o.inv, 'الفاتورة'), fresh ? `طلب #${o.no}${sts.length ? ' · وصل لـ' + sts.join(' و') : ''}` : `${D.dateArS(o.ts)} · ${D.time(o.ts)}`)}
       <div class="modal__b">
         ${fresh ? stepper([['Tender', 'طريقة الدفع'], ['Confirm', 'التأكيد'], ['Receipt', 'الفاتورة']], 3) : ''}
-        ${fresh ? `<div class="done-ok">${check()}${o.cash && o.cash.change ? `<span class="muted">Change · الباقي للعميل</span><span class="change">${fmt(o.cash.change)} ر.س</span>` : `<b>${fmt(o.total)} ر.س · ${o.pays.map((p) => D.PAY[p.m].ar).join(' + ')}</b>`}${o.creditBack ? `<span class="muted">فرق الاستبدال للعميل كاش: ${fmt(o.creditBack)} ر.س</span>` : ''}</div>` : ''}
+        ${fresh ? `<div class="done-ok">${check()}${o.cash && o.cash.change ? `<span class="muted">Change · الباقي للعميل</span><span class="change">${fmt(o.cash.change)} ر.س</span>` : `<b>${fmt(o.total)} ر.س · ${o.pays.map((p) => D.PAY[p.m].ar).join(' + ') || 'مجاني'}</b>`}${o.creditBack ? `<span class="muted">فرق الاستبدال للعميل كاش: ${fmt(o.creditBack)} ر.س</span>` : ''}</div>` : ''}
         <div class="rc-stage">${D.receiptHTML(o, { print: fresh && s.settings.printer, copy })}</div>
         ${D.orderVat(o) ? `<details class="tlv"><summary style="cursor:pointer;font-weight:800">${bi('ZATCA QR', 'ماذا يحتوي QR الفاتورة؟ — المرحلة الأولى')}</summary>
           <div style="margin-top:8px">${z.fields.map((f) => `<div><code>${f.tag}</code><span>${['', 'اسم البائع', 'الرقم الضريبي', 'وقت الفاتورة', 'الإجمالي مع الضريبة', 'مبلغ الضريبة'][f.tag]}</span><code>${esc(f.v)}</code></div>`).join('')}</div>
@@ -840,6 +845,7 @@
       </div>
       <div class="modal__f">${fresh && D.canRefund(o) ? `<button class="btn btn--danger" id="cx" style="flex:0 0 auto">${I('refund', 'sm')}${bi('Cancel', 'إلغاء الطلب')}</button>` : ''}<button class="btn btn--ghost" id="pr">${I('print', 'sm')}${bi('Print', 'اطبع')}</button>${D.LIVE ? '' : `<button class="btn btn--ghost" id="wa">${I('send', 'sm')}${bi('Send', 'للعميل')}</button>`}${fresh ? `<button class="btn btn--ink" data-close>${bi('New order', 'طلب جديد')}</button>` : ''}</div>`);
     $('#pr', m).addEventListener('click', () => D.print(D.receiptHTML(o, { copy: !fresh })));
+    if (fresh && D.REAL && s.settings.printer) D.print(D.receiptHTML(o, {})); // «طباعة الفاتورة تلقائيًا»
     if ($('#wa', m)) $('#wa', m).addEventListener('click', () => D.toast('أُرسلت الفاتورة (تجربة)', 'في التشغيل الفعلي تُرسل للعميل برسالة SMS أو واتساب مع رابط الفاتورة', { ic: 'send' }));
     if ($('#cx', m)) $('#cx', m).addEventListener('click', () => { m.close(); openRefund(o.id, { all: true, reason: 'mind' }); });
   }
@@ -1204,7 +1210,7 @@
       <div class="modal__f"><button class="btn btn--ghost" data-close>إلغاء</button><button class="btn btn--go" id="ok">افتح الوردية</button></div>`, { cls: 'modal--sm' });
     $('#ok', m).addEventListener('click', () => {
       const f = parseFloat($('#fl', m).value) || 0;
-      D.mutate((s) => { s.shifts.push({ id: 'sh' + D.uid(), reg: 1, user: me, open: Date.now(), float: f, close: null }); D.log(me, 'shift', `فتح وردية بعهدة ${fmt(f)} ر.س`); }, 'shift');
+      D.mutate((s) => { if (D.openShift(s, 1)) return; s.shifts.push({ id: 'sh' + D.uid(), reg: 1, user: me, open: Date.now(), float: f, close: null }); D.log(me, 'shift', `فتح وردية بعهدة ${fmt(f)} ر.س`); }, 'shift');
       m.close(); D.drawerPop('فُتح الدرج — ضع العهدة'); render();
     });
   }
@@ -1419,20 +1425,21 @@
       <div class="kpi"><span class="label">Rewards</span><b>${s.customers.reduce((a, c) => a + (c.rewards || 0), 0)}</b><small>مشروب هدية مستني</small></div></div>
       <label class="search" style="display:block;margin-bottom:12px"><span>${I('search')}</span><input class="input" id="cq" placeholder="ابحث بالاسم أو الجوال" value="${esc(cq)}"></label>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>العميل</th><th>الجوال</th><th>الزيارات</th><th>الأختام</th><th>المفضّل</th><th class="r">إجمالي الصرف</th><th>آخر زيارة</th></tr></thead><tbody>
-      ${list.map((c) => `<tr class="click" data-c="${c.id}"><td><b>${esc(c.name)}</b> ${c.tag ? `<span class="pill ${c.tag === 'VIP' ? 'pill--ink' : 'pill--blue'}">${c.tag}</span>` : ''}</td><td class="mono nw" style="direction:ltr;text-align:right">${c.phone.slice(0, 3)}•••${c.phone.slice(-4)}</td><td class="num">${c.visits}</td><td class="nw"><span class="stamps">${Array.from({ length: s.settings.loyalNeed }, (_, i) => `<i class="${i < c.stamps ? 'on' : ''}"></i>`).join('')}</span>${c.rewards ? ` <span class="pill pill--go">${I('gift', 'sm')} ${c.rewards}</span>` : ''}</td><td class="nw">${esc(D.prod(c.fav).ar)}</td><td class="r nw">${money(c.spend)}</td><td class="nw muted">${D.ago(c.last)}</td></tr>`).join('')}</tbody></table></div>`;
+      ${list.map((c) => `<tr class="click" data-c="${c.id}"><td><b>${esc(c.name)}</b> ${c.tag ? `<span class="pill ${c.tag === 'VIP' ? 'pill--ink' : 'pill--blue'}">${c.tag}</span>` : ''}</td><td class="mono nw" style="direction:ltr;text-align:right">${c.phone.slice(0, 3)}•••${c.phone.slice(-4)}</td><td class="num">${c.visits}</td><td class="nw"><span class="stamps">${Array.from({ length: s.settings.loyalNeed }, (_, i) => `<i class="${i < c.stamps ? 'on' : ''}"></i>`).join('')}</span>${c.rewards ? ` <span class="pill pill--go">${I('gift', 'sm')} ${c.rewards}</span>` : ''}</td><td class="nw">${esc(favName(c))}</td><td class="r nw">${money(c.spend)}</td><td class="nw muted">${D.ago(c.last)}</td></tr>`).join('')}</tbody></table></div>`;
     const ci = $('#cq', view);
     ci.addEventListener('input', () => { cq = ci.value.trim(); const pos = ci.selectionStart; renderCustomers(view); const n = $('#cq', view); n.focus(); n.setSelectionRange(pos, pos); });
     $$('[data-c]', view).forEach((r) => r.addEventListener('click', () => customerCard(r.dataset.c)));
   }
+  const favName = (c) => (c.fav && D.has(c.fav) ? D.prod(c.fav).ar : '—');
   function customerCard(id) {
     const s = S(); const c = s.customers.find((x) => x.id === id);
     const os = s.orders.filter((o) => o.cust === id).slice().reverse();
     const m = D.modal(`${D.head(esc(c.name), `${c.visits} زيارة · عميل من ${Math.max(2, Math.round(c.visits / 3))} شهور`)}
       <div class="modal__b"><div class="card" style="text-align:center;padding:18px"><span class="label">Loyalty card</span><div style="margin:10px 0"><span class="stamps lg">${Array.from({ length: s.settings.loyalNeed }, (_, i) => `<i class="${i < c.stamps ? 'on' : ''}"></i>`).join('')}</span></div><b>${c.stamps} من ${s.settings.loyalNeed}</b>${c.rewards ? `<div class="pill pill--go" style="margin-top:8px">${I('gift', 'sm')} لديه ${c.rewards} مشروب هدية</div>` : `<div class="muted" style="font-size:12.5px">متبقٍ ${s.settings.loyalNeed - c.stamps} مشروبات على الهدية</div>`}</div>
-        <div class="grid g3" style="margin:12px 0"><div class="kpi" style="padding:12px"><span class="label">Spend</span><b style="font-size:20px">${D.fmt0(c.spend)}</b></div><div class="kpi" style="padding:12px"><span class="label">Avg</span><b style="font-size:20px">${D.fmt0(c.spend / Math.max(1, c.visits))}</b></div><div class="kpi" style="padding:12px"><span class="label">Favorite</span><b style="font-size:15px">${esc(D.prod(c.fav).ar)}</b></div></div>
+        <div class="grid g3" style="margin:12px 0"><div class="kpi" style="padding:12px"><span class="label">Spend</span><b style="font-size:20px">${D.fmt0(c.spend)}</b></div><div class="kpi" style="padding:12px"><span class="label">Avg</span><b style="font-size:20px">${D.fmt0(c.spend / Math.max(1, c.visits))}</b></div><div class="kpi" style="padding:12px"><span class="label">Favorite</span><b style="font-size:15px">${esc(favName(c))}</b></div></div>
         ${os.length ? `<h4 style="font-size:13px;margin-bottom:6px">طلبات اليوم</h4>${os.map((o) => `<div class="set-row"><span><b>#${o.no} · ${esc(o.lines.map((l) => D.prod(l.pid).ar).join('، '))}</b><small>${D.time(o.ts)}</small></span>${money(o.total)}</div>`).join('')}` : ''}</div>
       <div class="modal__f"><button class="btn btn--ghost" data-close>إغلاق</button><button class="btn btn--go" id="use">${I('register', 'sm')} ابدأ طلبًا باسمه</button></div>`);
-    $('#use', m).addEventListener('click', () => { cart.cust = id; m.close(); go('sell'); });
+    $('#use', m).addEventListener('click', () => { setCust(id); m.close(); go('sell'); });
   }
 
   /* =====================================================================
@@ -1471,7 +1478,7 @@
       view.innerHTML = head + `<div class="card empty">${I('chart')}<b style="color:var(--ink-2)">${bi('No sales yet', 'لا توجد مبيعات في هذه الفترة بعد')}</b><span>${rng === 'today' ? 'أول فاتورة اليوم ستظهر هنا مباشرة.' : 'الأيام السابقة تظهر هنا بعد أول يوم تشغيل كامل.'}</span></div>`;
     } else {
       const mixTot = Object.values(agg.by).reduce((a, b) => a + b, 0) || 1;
-      const top = Object.entries(agg.items).map(([id, v]) => ({ id, ...v })).filter((t) => D.prod(t.id)).sort((a, b) => b.v - a.v);
+      const top = Object.entries(agg.items).map(([id, v]) => ({ id, ...v })).filter((t) => D.has(t.id)).sort((a, b) => b.v - a.v);
       const sold = new Set(top.map((t) => t.id));
       const unsold = D.PRODUCTS.filter((p) => !sold.has(p.id) && !p.offer).slice(0, 6);
       const rows = rng === 'today' || rng === 'yday'

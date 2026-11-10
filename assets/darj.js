@@ -121,7 +121,10 @@
   ];
   // صنف اتضاف في الموقع بعد آخر تحديث لمنيو الكاشير: بيظهر في الطلب باسمه كملاحظة، ومش موجود في شاشة البيع
   D.SITE_ITEM = { id: 'site_item', cat: '_site', ar: 'صنف من الموقع', online: 'صنف من الموقع', en: 'Website item', price: 0, drink: true, station: 'bar', mods: [], r: {}, pop: 0 };
-  D.prod = (id) => D.PRODUCTS.find((p) => p.id === id) || (id === 'site_item' ? D.SITE_ITEM : undefined);
+  D.has = (id) => id === 'site_item' || D.PRODUCTS.some((p) => p.id === id);
+  // صنف اتشال من المنيو بعد ما اتباع: الفواتير القديمة والمرتجعات والتحضير لازم تفضل شغالة
+  const gone = (id) => ({ id, cat: '_gone', ar: 'صنف محذوف من المنيو', en: 'Removed item', price: 0, mods: [], r: {}, pop: 0, gone: 1 });
+  D.prod = (id) => D.PRODUCTS.find((p) => p.id === id) || (id === 'site_item' ? D.SITE_ITEM : gone(id));
   D.isDrink = (p) => (p.drink != null ? !!p.drink : !['sweet', 'beans'].includes(p.cat) && p.id !== 'water');
   D.PIMG = D.PIMG || {}; // id → true لما الصورة تكون موجودة في assets/img/p/ (بيتملى من img.js)
   D.img = (p) => p.img || (D.PIMG[p.id] ? `assets/img/p/${p.id}.jpg` : '');
@@ -506,8 +509,8 @@
     // الهالك
     [[7, 5, 'milk', 2000, 'حليب منتهي من أمس', 'u2'], [12, 40, 'span', 1, 'مشروب حُضّر بالخطأ (حليب بدل شوفان)', 'u2'], [18, 25, 'crois', 2, 'كرواسون بايت', 'u3']].forEach(([h, mi, id, q, why, u]) => {
       const ts = D.at(h, mi, now); if (ts >= now) return;
-      if (!D.prod(id) && !D.ING.some((i) => i.id === id)) return;
-      const p = D.prod(id);
+      if (!D.has(id) && !D.ING.some((i) => i.id === id)) return;
+      const p = D.has(id) ? D.prod(id) : null;
       if (p) { const r = D.recipe({ pid: id, qty: q, mods: D.defMods(p) }); consume(S.stock, [{ pid: id, qty: q, mods: D.defMods(p) }]); S.waste.push({ ts, pid: id, q, why, user: u, cost: D.r2(D.recipeCost(r)) }); }
       else { S.stock[id] = Math.max(0, S.stock[id] - q); S.waste.push({ ts, ing: id, q, why, user: u, cost: D.r2(q * D.ing(id).cost) }); }
       log(ts, u, 'waste', `هالك: ${p ? p.ar + ' ×' + q : D.ing(id).ar + ' ' + D.fmt0(q) + ' ' + D.UNIT[D.ing(id).unit]} — ${why}`);
@@ -563,9 +566,11 @@
   const emit = (why) => subs.forEach((fn) => { try { fn(why); } catch (e) { console.error(e); } });
   function read() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
   let storageWarned = 0;
+  let unsaved = false; // آخر حفظ فشل: الذاكرة هي المرجع لحد ما الحفظ ينجح
   function write(s) {
-    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { // التخزين ممكن يبقى مقفول — الديمو يكمل في الذاكرة، والنسخة الحقيقية لازم تنبّه
-      if (D.REAL && D.toast && Date.now() - storageWarned > 60000) { storageWarned = Date.now(); D.toast('تعذّر حفظ البيانات على الجهاز', 'نزّل نسخة احتياطية من الإعدادات وراجع مساحة المتصفح', { warn: 1, ic: 'alert', ms: 9000 }); }
+    try { localStorage.setItem(KEY, JSON.stringify(s)); unsaved = false; } catch (e) {
+      unsaved = true; // التخزين ممكن يبقى مقفول — الديمو يكمل في الذاكرة، والنسخة الحقيقية لازم تنبّه
+      if (D.REAL && D.toast && Date.now() - storageWarned > 15000) { storageWarned = Date.now(); D.toast('تعذّر حفظ البيانات على الجهاز', 'نزّل نسخة احتياطية من الإعدادات وراجع مساحة المتصفح', { warn: 1, ic: 'alert', ms: 9000 }); }
     }
   }
   function emptyLive(now) {
@@ -641,12 +646,12 @@
   D.orderVat = (o) => (o && o.total > 0 ? o.vat > 0 : D.vatOn());
   D.exVat = (p) => (D.vatOn() ? p / 1.15 : p);
   D.noteName = (o) => (D.orderVat(o) ? { ar: 'إشعار دائن', en: 'Credit note' } : { ar: 'إشعار مرتجع', en: 'Refund note' });
-  D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
+  D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = unsaved ? null : read(); if (fresh && fresh.day === S.day && (fresh.rev || 0) >= (S.rev || 0)) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
   D.installState = (st) => { S = st; write(S); bind(); emit('reset'); };
   D.reset = () => { try { localStorage.removeItem(KEY); localStorage.removeItem(CART_KEY); } catch (e) { /* */ } S = D.REAL ? emptyLive(Date.now()) : seed(Date.now()); write(S); bind(); emit('reset'); };
   window.addEventListener('storage', (e) => {
     if (D.SAT) return;
-    if (e.key === KEY && e.newValue) { try { const n = JSON.parse(e.newValue); const same = S && n.rev === S.rev && n.day === S.day; S = n; bind(); if (!same) emit('remote'); } catch (er) { /* */ } }
+    if (e.key === KEY && e.newValue && !unsaved) { try { const n = JSON.parse(e.newValue); const same = S && n.rev === S.rev && n.day === S.day; S = n; bind(); if (!same) emit('remote'); } catch (er) { /* */ } }
     if (e.key === CART_KEY) emit('cart');
   });
   // لو الصفحة اتقفلت شوية، نكمّل النشاط اللي فات بطلبات واقعية (من غير ما نزوّد الجرس)
@@ -751,7 +756,7 @@
   D.kioskOrder = (d) => D.mutate((s) => {
     const dup = d.kid && s.orders.find((o) => o.kid === d.kid); if (dup) return dup;
     const now = Date.now();
-    const lines = (d.lines || []).filter((l) => D.prod(l.pid) && l.qty > 0).map((l) => ({ pid: l.pid, qty: Math.min(20, l.qty), mods: l.mods || D.defMods(D.prod(l.pid)), note: l.note || '', unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l), st: D.routeOf(s, D.prod(l.pid)) }));
+    const lines = (d.lines || []).filter((l) => D.has(l.pid) && l.qty > 0).map((l) => ({ pid: l.pid, qty: Math.min(20, l.qty), mods: l.mods || D.defMods(D.prod(l.pid)), note: l.note || '', unit: D.unitPrice(s, l), total: D.lineTotal(s, l), cost: D.lineCost(l), st: D.routeOf(s, D.prod(l.pid)) }));
     if (!lines.length) return null;
     const c = D.calc(s, lines, null);
     const paid = !!d.pay;
@@ -901,8 +906,8 @@
   D.tick = () => {
     if (!S || D.SAT || !isLeader()) return;
     const now = Date.now();
-    if (D.dayKey(now) !== S.day) { if (D.REAL) { S = read() || S; rollover(S, now); write(S); bind(); emit('day'); } else D.reset(); return; }
-    const fresh = read(); if (fresh && fresh.day === S.day) { S = fresh; bind(); }
+    if (D.dayKey(now) !== S.day) { if (D.REAL) { S = (unsaved ? null : read()) || S; rollover(S, now); write(S); bind(); emit('day'); } else D.reset(); return; }
+    const fresh = unsaved ? null : read(); if (fresh && fresh.day === S.day && (fresh.rev || 0) >= (S.rev || 0)) { S = fresh; bind(); }
     const s = S;
     let changed = false;
     const before = s.orders.map((o) => o.status).join();
