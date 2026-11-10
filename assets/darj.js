@@ -17,7 +17,7 @@
   const KEY = BASE + (D.LIVE ? (train ? ':train' : ':live') : '') + ':state';
   const CART_KEY = BASE + ':cart';
   const LEAD_KEY = BASE + ':leader';
-  D.setTraining = (on) => { try { localStorage.setItem(BASE + ':train', on ? '1' : '0'); sessionStorage.removeItem('darj:me'); } catch (e) { /* */ } location.reload(); };
+  D.setTraining = (on) => { try { localStorage.setItem(BASE + ':train', on ? '1' : '0'); if (!on && D.TRAIN) localStorage.setItem(BASE + ':trainEnd', String(Date.now())); sessionStorage.removeItem('darj:me'); } catch (e) { /* */ } location.reload(); };
   const TAB = Math.random().toString(36).slice(2, 9);
 
   /* ---------- store ---------- */
@@ -573,6 +573,7 @@
       if (D.REAL && D.toast && Date.now() - storageWarned > 15000) { storageWarned = Date.now(); D.toast('تعذّر حفظ البيانات على الجهاز', 'نزّل نسخة احتياطية من الإعدادات وراجع مساحة المتصفح', { warn: 1, ic: 'alert', ms: 9000 }); }
     }
   }
+  D.saved = () => !unsaved;
   function emptyLive(now) {
     return { v: 1, live: 1, day: D.dayKey(now), created: now, seq: { inv: 0, no: 0, cn: 0, z: 0, po: 0 },
       orders: [], holds: [], shifts: [], payouts: [], log: [], waste: [], receipts: [], counts: [], feed: [], pendingRemote: [],
@@ -596,7 +597,10 @@
     const sm = { day, total: 0, vat: 0, orders: ok.length, refunds: 0, cost: 0, by: {}, hours: Array(24).fill(0), items: {} };
     ok.forEach((o) => {
       sm.total += D.netOf(o); sm.vat += o.vat - (o.refunds || []).reduce((x, r) => x + (r.vat || 0), 0); sm.refunds += o.refunded || 0;
-      o.pays.forEach((p) => { sm.by[p.m] = D.r2((sm.by[p.m] || 0) + p.a); });
+      // طرق الدفع = الفلوس اللي دخلت فعلًا: من غير رصيد الاستبدال، وبعد طرح المرتجعات وفرق الاستبدال اللي رجع كاش
+      o.pays.forEach((p) => { if (p.m !== 'credit') sm.by[p.m] = D.r2((sm.by[p.m] || 0) + p.a); });
+      (o.refunds || []).forEach((r) => (r.parts || []).forEach((p) => { if (p.m !== 'exchange') sm.by[p.m] = D.r2((sm.by[p.m] || 0) - p.a); }));
+      if (o.creditBack) sm.by.cash = D.r2((sm.by.cash || 0) - o.creditBack);
       sm.hours[D.ksa(o.ts).h] = D.r2(sm.hours[D.ksa(o.ts).h] + o.total);
       o.lines.forEach((l) => { const it = sm.items[l.pid] = sm.items[l.pid] || { q: 0, v: 0 }; it.q += l.qty; it.v = D.r2(it.v + l.total); sm.cost += l.cost || 0; });
     });
@@ -605,6 +609,19 @@
   };
   D.today = (st) => { st = st || S; return st.orders.filter((o) => !o.day || o.day === st.day); };
   const KEEP_DAYS = 3; // آخر 3 أيام بتفضل على الجهاز عشان المرتجعات
+  // لو أرشفة يوم فشلت: سجله يفضل محفوظ في الحالة (وفي النسخة الاحتياطية) لحد ما الأرشفة تنجح، والمدير يتنبّه
+  function archFail(rec) {
+    try { D.mutate((s) => { s.unarchived = (s.unarchived || []).filter((x) => x.day !== rec.day).concat([rec]).slice(-14); }, 'archive'); } catch (e) { /* */ }
+    if (D.toast) D.toast(`تعذّرت أرشفة يوم ${rec.day}`, 'بياناته محفوظة مؤقتًا على الجهاز — نزّل نسخة احتياطية من الإعدادات', { warn: 1, ic: 'alert', ms: 12000 });
+  }
+  D.retryArchive = async () => {
+    const list = ((S && S.unarchived) || []).slice();
+    for (const rec of list) {
+      try { await D.archive(rec); } catch (e) { return false; }
+      D.mutate((s) => { s.unarchived = (s.unarchived || []).filter((x) => x.day !== rec.day); }, 'archive');
+    }
+    return true;
+  };
   function rollover(st, now) {
     const day = D.dayKey(now);
     if (st.day === day) return false;
@@ -612,7 +629,8 @@
     const open = new Set(st.shifts.filter((x) => !x.close).map((x) => x.id));
     const todays = st.orders.filter((o) => (o.day || prev) === prev);
     st.days = (st.days || []).filter((d) => d.day !== prev).concat([D.summarize(prev, todays)]).slice(-400);
-    D.archive({ day: prev, orders: todays, shifts: st.shifts.filter((x) => x.close), payouts: st.payouts.filter((p) => !open.has(p.shift)), waste: st.waste, log: st.log, receipts: st.receipts, counts: st.counts }).catch(() => {});
+    const rec = { day: prev, orders: todays, shifts: st.shifts.filter((x) => x.close), payouts: st.payouts.filter((p) => !open.has(p.shift)), waste: st.waste, log: st.log, receipts: st.receipts, counts: st.counts };
+    D.archive(rec).catch(() => archFail(rec));
     const recent = Array.from(new Set(st.orders.map((o) => o.day || prev))).sort().slice(-(KEEP_DAYS - 1));
     st.orders = st.orders.filter((o) => recent.includes(o.day || prev) || open.has(o.shift) || ['new', 'prep', 'ready'].includes(o.status) || o.unpaid);
     st.shifts = st.shifts.filter((x) => !x.close);
@@ -647,7 +665,7 @@
   D.exVat = (p) => (D.vatOn() ? p / 1.15 : p);
   D.noteName = (o) => (D.orderVat(o) ? { ar: 'إشعار دائن', en: 'Credit note' } : { ar: 'إشعار مرتجع', en: 'Refund note' });
   D.mutate = (fn, why) => { if (!S) D.load(); if (D.SAT) { const r = fn(S); S.rev = (S.rev || 0) + 1; emit(why || 'local'); return r; } const fresh = unsaved ? null : read(); if (fresh && fresh.day === S.day && (fresh.rev || 0) >= (S.rev || 0)) { S = fresh; bind(); } const r = fn(S); bind(); S.rev = (S.rev || 0) + 1; write(S); emit(why || 'local'); return r; };
-  D.installState = (st) => { S = st; write(S); bind(); emit('reset'); };
+  D.installState = (st, quiet) => { S = st; write(S); bind(); if (!quiet) emit('reset'); };
   D.reset = () => { try { localStorage.removeItem(KEY); localStorage.removeItem(CART_KEY); } catch (e) { /* */ } S = D.REAL ? emptyLive(Date.now()) : seed(Date.now()); write(S); bind(); emit('reset'); };
   window.addEventListener('storage', (e) => {
     if (D.SAT) return;
@@ -947,7 +965,7 @@
       s.pendingRemote.forEach((o) => { o.synced = true; s.orders.push(o); D.feedPush(feedFor(o)); });
       s.pendingRemote = [];
       s.orders.sort((a, b) => a.ts - b.ts);
-      D.log(user, 'sync', `عاد الاتصال — تمت مزامنة ${n} فاتورة مع السحابة`);
+      D.log(user, 'sync', D.REAL ? 'عاد الاتصال بالإنترنت' : `عاد الاتصال — تمت مزامنة ${n} فاتورة مع السحابة`);
       return n;
     }
     return 0;
@@ -1158,24 +1176,53 @@
   D.head = (t, s) => `<div class="modal__h"><div><h2>${t}</h2>${s ? `<p>${s}</p>` : ''}</div><button class="icon-btn" data-close aria-label="إغلاق">${D.icon('x')}</button></div>`;
 
   // موافقة مشرف/مدير بالـPIN — بترجع المستخدم اللي وافق أو null
-  D.approve = (perm, why, current) => new Promise((resolve) => {
+  // حماية الـPIN في التشغيل الحقيقي: 5 محاولات غلط ورا بعض = قفل دقيقة، وبتتسجل في سجل الحركات.
+  // عدّاد الدخول منفصل عن عدّاد الموافقات، فالدخول الصحيح مايصفّرش محاولات تخمين PIN المشرف.
+  const PIN_KEY = BASE + ':pinlock';
+  let pinMem = null;
+  const pinAll = () => { if (!pinMem) { try { pinMem = JSON.parse(localStorage.getItem(PIN_KEY) || 'null'); } catch (e) { /* */ } pinMem = pinMem || {}; } return pinMem; };
+  const pinPut = () => { try { localStorage.setItem(PIN_KEY, JSON.stringify(pinMem)); } catch (e) { /* */ } };
+  D.pinWait = (kind) => (D.REAL ? Math.max(0, ((pinAll()[kind] || {}).until || 0) - Date.now()) : 0);
+  D.pinOk = (kind) => { if (!D.REAL) return; pinAll()[kind] = { n: 0, until: 0 }; pinPut(); };
+  D.pinFail = (kind, user, what) => {
+    if (!D.REAL) return 0;
+    const all = pinAll();
+    const x = all[kind] = all[kind] || { n: 0, until: 0 };
+    x.n += 1;
+    let wait = 0;
+    if (x.n >= 5) { x.n = 0; wait = 60000; x.until = Date.now() + wait; D.mutate(() => D.log(user || null, 'pin', `5 محاولات PIN خاطئة متتالية — ${what}`, null, 'risk'), 'pin'); }
+    pinPut();
+    return wait;
+  };
+  D.pinMsg = (ms) => `محاولات كثيرة — حاول بعد ${Math.ceil(ms / 1000)} ثانية`;
+  D.approve = (perm, why, current, opt) => new Promise((resolve) => {
+    opt = opt || {};
     if (D.can(current, perm) === 1) { resolve(D.staff(current)); return; }
     const p = D.PERMS.find((x) => x.id === perm);
+    const label = opt.label || (p ? p.ar : '');
     let pin = '';
-    const m = D.modal(`${D.head('موافقة المشرف', `${p ? p.ar : ''}${why ? ' — ' + D.esc(why) : ''}`)}
+    const m = D.modal(`${D.head('موافقة المشرف', `${D.esc(label)}${why ? ' — ' + D.esc(why) : ''}`)}
       <div class="modal__b"><div class="blind">${D.icon('shield', 'sm')} هذه العملية تحتاج رمز PIN لمشرف أو مدير، وستُسجَّل في سجل الحركات باسمه.</div>
       <div class="pin__dots" style="margin-top:18px">${'<i></i>'.repeat(4)}</div>
       <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-n="${n}">${n}</button>`).join('')}<button class="fn" data-n="c">مسح</button><button data-n="0">0</button><button class="fn" data-n="b">رجوع</button></div>
+      <p class="pin__hint" data-pinmsg style="color:var(--red);min-height:16px;margin-top:8px"></p>
       ${D.REAL ? '' : '<p class="pin__hint">للتجربة: فيصل (مشرف) <b>2222</b> · نورة (مديرة) <b>9999</b></p>'}</div>`, { cls: 'modal--sm', onClose: () => resolve(null) });
     const dots = m.querySelector('.pin__dots');
     const paint = () => dots.querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i < pin.length));
+    const say = (t) => { const el = m.querySelector('[data-pinmsg]'); if (el) el.textContent = t || ''; };
     const press = (n) => {
+      const held = D.pinWait('approve');
+      if (held) { pin = ''; paint(); say(D.pinMsg(held)); return; }
+      say('');
       if (n === 'c') pin = ''; else if (n === 'b') pin = pin.slice(0, -1); else if (pin.length < 4) pin += n;
       paint();
       if (pin.length === 4) {
         const u = D.STAFF.find((s) => s.pin === pin && D.can(s, perm) === 1);
-        if (u) { setTimeout(() => { resolve(u); m.close('ok'); }, 140); }
-        else { dots.classList.add('err'); setTimeout(() => { dots.classList.remove('err'); pin = ''; paint(); }, 420); }
+        if (u) { D.pinOk('approve'); setTimeout(() => { resolve(u); m.close('ok'); }, 140); }
+        else {
+          dots.classList.add('err'); setTimeout(() => { dots.classList.remove('err'); pin = ''; paint(); }, 420);
+          const w = D.pinFail('approve', current || null, `موافقة: ${label}`); if (w) say(D.pinMsg(w));
+        }
       }
     };
     m.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => press(b.dataset.n)));
@@ -1312,6 +1359,8 @@
     if (D.REAL) {
       const sync = () => { const off = !navigator.onLine; if (!!D.state().settings.offline !== off) D.goOffline(off, null); };
       window.addEventListener('online', sync); window.addEventListener('offline', sync); setTimeout(sync, 800);
+      try { if (localStorage.getItem(BASE + ':trainEnd')) { localStorage.removeItem(BASE + ':trainEnd'); D.mutate(() => D.log(null, 'settings', 'رجوع من وضع التدريب إلى التشغيل الحقيقي', null, 'warn'), 'set'); } } catch (e) { /* */ }
+      setTimeout(D.retryArchive, 5000); setInterval(D.retryArchive, 10 * 60000);
     }
   };
 })();

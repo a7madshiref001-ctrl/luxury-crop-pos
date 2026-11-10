@@ -147,6 +147,7 @@
         <div style="text-align:center"><span class="label">Enter PIN</span><div id="pinWho" style="font-weight:800;font-size:16px;margin-top:4px"></div></div>
         <div class="pin__dots">${'<i></i>'.repeat(4)}</div>
         <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-n="${n}">${n}</button>`).join('')}<button class="fn" data-n="c">مسح</button><button data-n="0">0</button><button class="fn" data-n="b">رجوع</button></div>
+        <p class="pin__hint" id="pinMsg" style="color:var(--red);min-height:16px"></p>
         ${D.REAL ? '' : '<p class="pin__hint">PIN التجربة: ريم <b>1111</b> · فيصل <b>2222</b> · Joseph <b>3333</b> · سارة <b>4444</b> · نورة <b>9999</b></p>'}
       </div></div>`;
     document.body.appendChild(el);
@@ -155,19 +156,37 @@
     const paint = () => $$('i', dots).forEach((d, i) => d.classList.toggle('on', i < pin.length));
     who();
     el.addEventListener('click', (e) => {
-      if (e.target.closest('#trainSw')) { D.setTraining(!D.TRAIN); return; }
+      if (e.target.closest('#trainSw')) {
+        if (D.TRAIN) { D.setTraining(false); return; }
+        // المبيعات في التدريب مابتدخلش حسابات المحل، فالدخول له بموافقة مشرف أو مدير وبيتسجل
+        D.approve('refund', '', null, { label: 'تشغيل وضع التدريب — مبيعاته لا تدخل حسابات المحل' }).then((u) => {
+          if (!u) return;
+          D.mutate(() => D.log(u.id, 'settings', 'تشغيل وضع التدريب من شاشة القفل', null, 'warn'), 'set');
+          D.setTraining(true);
+        });
+        return;
+      }
       const u = e.target.closest('[data-u]');
       if (u) { pick = u.dataset.u; pin = ''; paint(); $$('[data-u]', el).forEach((b) => b.classList.toggle('on', b === u)); who(); return; }
       const n = e.target.closest('[data-n]'); if (n) press(n.dataset.n);
     });
-    const key = (e) => { if (/^\d$/.test(e.key)) press(e.key); else if (e.key === 'Backspace') press('b'); };
+    const key = (e) => { if (document.querySelector('.ovl')) return; if (/^\d$/.test(e.key)) press(e.key); else if (e.key === 'Backspace') press('b'); };
     document.addEventListener('keydown', key);
+    const say = (t) => { const x = $('#pinMsg', el); if (x) x.textContent = t || ''; };
     function press(n) {
+      const held = D.pinWait('login');
+      if (held) { pin = ''; paint(); say(D.pinMsg(held)); return; }
+      say('');
       if (n === 'c') pin = ''; else if (n === 'b') pin = pin.slice(0, -1); else if (pin.length < 4) pin += n;
       paint();
       if (pin.length < 4) return;
       const u = D.staff(pick);
-      if (!u.pin || pin !== u.pin) { dots.classList.add('err'); D.sound('err'); setTimeout(() => { dots.classList.remove('err'); pin = ''; paint(); }, 420); return; }
+      if (!u.pin || pin !== u.pin) {
+        dots.classList.add('err'); D.sound('err'); setTimeout(() => { dots.classList.remove('err'); pin = ''; paint(); }, 420);
+        const w = D.pinFail('login', null, `دخول باسم ${u.name}`); if (w) say(D.pinMsg(w));
+        return;
+      }
+      D.pinOk('login');
       me = u.id; try { sessionStorage.setItem('darj:me', me); } catch (er) { /* */ }
       document.removeEventListener('keydown', key);
       D.mutate(() => D.log(me, 'login', `تسجيل دخول — كاشير 1 (${D.ROLES[u.role].ar})`), 'login');
@@ -200,7 +219,7 @@
       if (step === 3) body = `<div class="done-ok">${check()}<b style="font-size:18px">${bi('Ready to open', 'النظام جاهز')}</b><span class="muted">${esc(f.nameAr)} · ${esc(f.branchAr)} · ${f.vatOn ? 'فاتورة ضريبية' : 'إيصال بدون ضريبة'}</span></div>
         <div class="blind">${I('drawer', 'sm')}<span>الخطوة الجاية: افتح أول وردية بالعهدة اللي في الدرج، وابدأ البيع. كل الأرقام تبدأ من الصفر.</span></div>`;
       el.innerHTML = `<div class="pin" style="width:min(640px,100%)">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">${D.brand()}<span style="display:flex;align-items:center;gap:8px"><button class="btn btn--soft btn--sm" id="sTrain" title="جرّب النظام ببيانات تجريبية أولًا">${I('play', 'sm')}${bi('Training', 'جرّب أولًا')}</button><span class="label">First-time setup</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">${D.brand()}<span style="display:flex;align-items:center;gap:8px"><button class="btn btn--ghost btn--sm" id="sRestore" title="لو عندك نسخة احتياطية من جهاز سابق">${I('download', 'sm')}${bi('Restore', 'استرجاع نسخة')}</button><button class="btn btn--soft btn--sm" id="sTrain" title="جرّب النظام ببيانات تجريبية أولًا">${I('play', 'sm')}${bi('Training', 'جرّب أولًا')}</button><span class="label">First-time setup</span></span></div>
         ${stepper(STEPS, step)}
         <div class="wz">${body}</div>
         ${err ? `<div class="blind" style="margin-top:12px;color:var(--red)">${I('alert', 'sm')}<span>${err}</span></div>` : ''}
@@ -213,6 +232,7 @@
       };
       $$('[data-vat]', el).forEach((b) => b.addEventListener('click', () => { grab(); f.vatOn = b.dataset.vat === '1'; paint(); }));
       $('#sTrain', el).addEventListener('click', () => D.setTraining(true));
+      $('#sRestore', el).addEventListener('click', () => restoreFlow(true));
       if ($('#sBack', el)) $('#sBack', el).addEventListener('click', () => { grab(); step -= 1; paint(); });
       $('#sNext', el).addEventListener('click', () => {
         grab();
@@ -1224,7 +1244,7 @@
     const s = S();
     const seeCost = can('cost') === 1, editPrice = can('price') === 1;
     const list = D.PRODUCTS.filter((p) => mcat === 'all' || p.cat === mcat);
-    view.innerHTML = `<div class="vh"><div><span class="label">Menu · ${D.PRODUCTS.length} items</span><h1>Menu</h1><p>الأسعار والتوفّر. أي تعديل يصل للكاشير ولمنيو QR في نفس اللحظة، ويُسجَّل اسم من عدّله.</p></div>
+    view.innerHTML = `<div class="vh"><div><span class="label">Menu · ${D.PRODUCTS.length} items</span><h1>Menu</h1><p>${D.LIVE ? 'الأسعار والتوفّر. أي تعديل يظهر على الكاشير والكشك فورًا، ويُسجَّل اسم من عدّله. منيو الموقع يُعدَّل من لوحة الموقع.' : 'الأسعار والتوفّر. أي تعديل يصل للكاشير ولمنيو QR في نفس اللحظة، ويُسجَّل اسم من عدّله.'}</p></div>
       ${editPrice ? '' : `<span class="pill">${I('lock', 'sm')} تعديل الأسعار للمدير فقط</span>`}</div>
       <div class="cats" style="padding:0 0 14px" id="mc"><button class="chip ${mcat === 'all' ? 'on' : ''}" data-c="all">${bi('All', 'الكل')}</button>${D.CATS.map((c) => `<button class="chip ${mcat === c.id ? 'on' : ''}" data-c="${c.id}">${bi(c.en, c.ar)}</button>`).join('')}</div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>الصنف</th><th>القسم</th><th>${D.vatOn() ? 'السعر شامل الضريبة' : 'السعر'}</th>${seeCost ? '<th class="r">تكلفة الكوب</th><th class="r">هامش الربح</th>' : ''}<th>متاح</th></tr></thead><tbody>
@@ -1246,7 +1266,7 @@
     $$('[data-av]', view).forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.av; const p = D.prod(id);
       D.mutate((st) => { const on = st.avail[id] !== false; st.avail[id] = !on; D.log(me, 'avail', `تغيير حالة صنف: ${p.ar} — ${on ? 'نفد (متوقف)' : 'متاح'}`); }, 'avail');
-      D.toast(S().avail[id] === false ? `تم إيقاف ${p.ar}` : `${p.ar} متاح من جديد`, 'تحدّث في الكاشير ومنيو QR', { ic: 'menu' });
+      D.toast(S().avail[id] === false ? `تم إيقاف ${p.ar}` : `${p.ar} متاح من جديد`, D.LIVE ? 'تحدّث في الكاشير والكشك' : 'تحدّث في الكاشير ومنيو QR', { ic: 'menu' });
       renderMenu(view);
     }));
     $$('[data-price]', view).forEach((inp) => {
@@ -1434,7 +1454,7 @@
   function customerCard(id) {
     const s = S(); const c = s.customers.find((x) => x.id === id);
     const os = s.orders.filter((o) => o.cust === id).slice().reverse();
-    const m = D.modal(`${D.head(esc(c.name), `${c.visits} زيارة · عميل من ${Math.max(2, Math.round(c.visits / 3))} شهور`)}
+    const m = D.modal(`${D.head(esc(c.name), `${c.visits} زيارة · ${D.REAL ? 'آخر زيارة ' + D.ago(c.last) : 'عميل من ' + Math.max(2, Math.round(c.visits / 3)) + ' شهور'}`)}
       <div class="modal__b"><div class="card" style="text-align:center;padding:18px"><span class="label">Loyalty card</span><div style="margin:10px 0"><span class="stamps lg">${Array.from({ length: s.settings.loyalNeed }, (_, i) => `<i class="${i < c.stamps ? 'on' : ''}"></i>`).join('')}</span></div><b>${c.stamps} من ${s.settings.loyalNeed}</b>${c.rewards ? `<div class="pill pill--go" style="margin-top:8px">${I('gift', 'sm')} لديه ${c.rewards} مشروب هدية</div>` : `<div class="muted" style="font-size:12.5px">متبقٍ ${s.settings.loyalNeed - c.stamps} مشروبات على الهدية</div>`}</div>
         <div class="grid g3" style="margin:12px 0"><div class="kpi" style="padding:12px"><span class="label">Spend</span><b style="font-size:20px">${D.fmt0(c.spend)}</b></div><div class="kpi" style="padding:12px"><span class="label">Avg</span><b style="font-size:20px">${D.fmt0(c.spend / Math.max(1, c.visits))}</b></div><div class="kpi" style="padding:12px"><span class="label">Favorite</span><b style="font-size:15px">${esc(favName(c))}</b></div></div>
         ${os.length ? `<h4 style="font-size:13px;margin-bottom:6px">طلبات اليوم</h4>${os.map((o) => `<div class="set-row"><span><b>#${o.no} · ${esc(o.lines.map((l) => D.prod(l.pid).ar).join('، '))}</b><small>${D.time(o.ts)}</small></span>${money(o.total)}</div>`).join('')}` : ''}</div>
@@ -1463,7 +1483,8 @@
     const seeCost = can('cost') === 1 && D.PRODUCTS.some((p) => Object.keys(p.r || {}).length);
     const today = D.summarize(s.day, D.today(s));
     const days = (s.days || []).slice();
-    const pick = rng === 'today' ? [today] : rng === 'yday' ? days.slice(-1) : rng === 'week' ? days.slice(-6).concat([today]) : days.slice(-29).concat([today]);
+    const ydKey = D.dayKey(Date.now() - 864e5);
+    const pick = rng === 'today' ? [today] : rng === 'yday' ? days.filter((d) => d.day === ydKey) : rng === 'week' ? days.slice(-6).concat([today]) : days.slice(-29).concat([today]);
     const agg = { total: 0, vat: 0, orders: 0, cost: 0, refunds: 0, by: {}, items: {}, hours: Array(24).fill(0) };
     pick.forEach((d) => {
       ['total', 'vat', 'orders', 'cost', 'refunds'].forEach((k) => { agg[k] += d[k] || 0; });
@@ -1471,13 +1492,13 @@
       Object.entries(d.items || {}).forEach(([k, v]) => { const it = agg.items[k] = agg.items[k] || { q: 0, v: 0 }; it.q += v.q; it.v += v.v; });
       (d.hours || []).forEach((h, i) => { agg.hours[i] += h; });
     });
-    const yd = days.slice(-1)[0];
+    const yd = days.find((d) => d.day === ydKey);
     const seg = `<div class="seg" id="rg">${[['today', 'Today', 'اليوم'], ['yday', 'Yesterday', 'أمس'], ['week', '7 days', 'أسبوع'], ['month', '30 days', 'شهر']].map(([k, en, l]) => `<button data-r="${k}" class="${rng === k ? 'on' : ''}">${bi(en, l)}</button>`).join('')}</div>`;
     const head = `<div class="vh"><div><span class="label">Reports · ${D.dateAr()}</span><h1>The numbers</h1><p>من فواتير المحل الحقيقية فقط. كل يوم يُقفل ويُؤرشف تلقائيًا الساعة ${D.OPEN_H} صباحًا.</p></div><div class="vh__act">${seg}</div></div>`;
     if (!agg.orders) {
       view.innerHTML = head + `<div class="card empty">${I('chart')}<b style="color:var(--ink-2)">${bi('No sales yet', 'لا توجد مبيعات في هذه الفترة بعد')}</b><span>${rng === 'today' ? 'أول فاتورة اليوم ستظهر هنا مباشرة.' : 'الأيام السابقة تظهر هنا بعد أول يوم تشغيل كامل.'}</span></div>`;
     } else {
-      const mixTot = Object.values(agg.by).reduce((a, b) => a + b, 0) || 1;
+      const mixTot = Object.values(agg.by).reduce((a, b) => a + Math.max(0, b), 0) || 1;
       const top = Object.entries(agg.items).map(([id, v]) => ({ id, ...v })).filter((t) => D.has(t.id)).sort((a, b) => b.v - a.v);
       const sold = new Set(top.map((t) => t.id));
       const unsold = D.PRODUCTS.filter((p) => !sold.has(p.id) && !p.offer).slice(0, 6);
@@ -1492,7 +1513,7 @@
           <div class="kpi"><span class="label">${vatOn ? 'VAT collected' : seeCost ? 'Gross profit' : 'Refunds'}</span><b>${vatOn ? fmt(agg.vat) : seeCost ? fmt(agg.total - agg.cost) : fmt(agg.refunds)}</b><small>${vatOn ? 'ر.س ضريبة القيمة المضافة 15%' : 'ر.س'}</small></div></div>
         <div class="grid" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);margin-top:14px" id="r2">
           <div class="card"><div class="card__h"><h3><span class="label">Sales</span>${rows[0] && rows[0].day ? 'المبيعات باليوم' : 'المبيعات بالساعة'}</h3>${rng === 'today' && yd ? '<div class="legend"><span><i style="background:var(--ink)"></i>اليوم</span><span><i style="background:var(--go)"></i>أمس</span></div>' : ''}</div>${chart(rows)}</div>
-          <div class="card"><div class="card__h"><h3><span class="label">Tenders</span>طرق الدفع</h3></div><div class="mix">${Object.entries(agg.by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="mix__row"><span>${D.PAY[k] ? D.PAY[k].ar : k}</span><span class="bar"><i style="width:${(v / mixTot * 100).toFixed(1)}%"></i></span><span class="num">${(v / mixTot * 100).toFixed(0)}% · ${D.fmt0(v)}</span></div>`).join('')}</div></div></div>
+          <div class="card"><div class="card__h"><h3><span class="label">Tenders</span>طرق الدفع</h3></div><div class="mix">${Object.entries(agg.by).filter(([, v]) => Math.abs(v) > 0.004).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="mix__row"><span>${D.PAY[k] ? D.PAY[k].ar : k}</span><span class="bar"><i style="width:${Math.max(0, v / mixTot * 100).toFixed(1)}%"></i></span><span class="num">${v > 0 ? (v / mixTot * 100).toFixed(0) + '% · ' : ''}${D.fmt0(v)}</span></div>`).join('')}</div></div></div>
         <div class="grid g2" style="margin-top:14px;align-items:start">
           <div class="card"><div class="card__h"><h3><span class="label">Best sellers</span>الأكثر مبيعًا</h3></div><div class="tbl-wrap" style="border:0"><table class="tbl"><thead><tr><th>الصنف</th><th class="r">الكمية</th><th class="r">المبيعات</th></tr></thead><tbody>${top.slice(0, 10).map((t) => `<tr><td><b>${esc(D.prod(t.id).ar)}</b></td><td class="r num">${t.q}</td><td class="r nw">${money(t.v)}</td></tr>`).join('')}</tbody></table></div></div>
           <div class="grid" style="gap:14px">
@@ -1619,8 +1640,8 @@
     const s = S();
     const acts = { all: ['All', 'الكل'], risk: ['Sensitive', 'حساس'], void: ['Voids', 'حذف'], disc: ['Discounts', 'خصومات'], refund: ['Refunds', 'مرتجعات'], nosale: ['No sale', 'فتح الدرج'], price: ['Prices', 'أسعار'], shift: ['Shifts', 'ورديات'], stock: ['Stock', 'مخزون'] };
     const logs = s.log.filter((l) => lf === 'all' || (lf === 'risk' ? l.sev !== 'info' : l.act === lf)).slice().reverse();
-    const sevPill = (l) => `<span class="pill ${l.sev === 'risk' ? 'pill--red' : l.sev === 'warn' ? 'pill--amber' : ''}">${{ login: 'دخول', shift: 'وردية', payout: 'مصروف', nosale: 'فتح درج', avail: 'توفّر', void: 'حذف', price: 'سعر', disc: 'خصم', refund: 'مرتجع', waste: 'هالك', stock: 'مخزون', offline: 'اتصال', sync: 'مزامنة', team: 'فريق', collect: 'تحصيل', settings: 'إعدادات' }[l.act] || l.act}</span>`;
-    view.innerHTML = `<div class="vh"><div><span class="label">Team · permissions · audit log</span><h1>Who did what</h1><p>كل موظف بصلاحيات دوره، وكل حركة حساسة تُسجَّل في سجل لا يمكن حذفه.</p></div></div>
+    const sevPill = (l) => `<span class="pill ${l.sev === 'risk' ? 'pill--red' : l.sev === 'warn' ? 'pill--amber' : ''}">${{ login: 'دخول', shift: 'وردية', payout: 'مصروف', nosale: 'فتح درج', avail: 'توفّر', void: 'حذف', price: 'سعر', disc: 'خصم', refund: 'مرتجع', waste: 'هالك', stock: 'مخزون', offline: 'اتصال', sync: 'مزامنة', team: 'فريق', collect: 'تحصيل', settings: 'إعدادات', pin: 'PIN', kiosk: 'الكشك' }[l.act] || l.act}</span>`;
+    view.innerHTML = `<div class="vh"><div><span class="label">Team · permissions · audit log</span><h1>Who did what</h1><p>${D.LIVE ? 'كل موظف بصلاحيات دوره، وكل حركة حساسة تُسجَّل باسم صاحبها. هنا سجل اليوم، والأيام السابقة محفوظة في الأرشيف والنسخة الاحتياطية.' : 'كل موظف بصلاحيات دوره، وكل حركة حساسة تُسجَّل في سجل لا يمكن حذفه.'}</p></div></div>
       ${D.REAL ? `<div style="display:flex;justify-content:flex-end;margin:-6px 0 12px"><button class="btn btn--ink" id="addStaff">${I('plus', 'sm')}${bi('Add staff', 'إضافة موظف')}</button></div>` : ''}
       <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-bottom:16px">${D.STAFF.map((u) => { const sh = s.shifts.find((x) => x.user === u.id && !x.close); return `<div class="card" ${D.REAL ? `data-staff="${u.id}" style="padding:14px;display:flex;gap:12px;align-items:center;cursor:pointer;${u.off ? 'opacity:.5' : ''}"` : 'style="padding:14px;display:flex;gap:12px;align-items:center"'}>${D.av(u, 'lg')}<span><b>${esc(u.name)}</b><br><small class="muted">${D.ROLES[u.role].ar} · PIN ••••</small><br>${u.id === me ? '<span class="pill pill--go"><i class="dot"></i> على الكاشير الآن</span>' : sh ? `<span class="pill pill--blue">وردية مفتوحة · كاشير ${sh.reg}</span>` : u.role === 'barista' ? '<span class="pill">على البار</span>' : '<span class="pill">خارج الوردية</span>'}</span></div>`; }).join('')}</div>
       <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);align-items:start" id="tg">
@@ -1668,6 +1689,7 @@
           ${[['print', 'طابعة الفواتير', 'أي طابعة حرارية 80مم معرّفة على الجهاز — الطباعة من نافذة الطباعة', 'test-print'], ['drawer', 'درج الكاش', 'يفتح مع الطابعة (إعداد «فتح الدرج» في تعريف الطابعة)', ''], ['card', 'جهاز الشبكة (مدى)', 'جهاز منفصل — المبلغ يُكتب على الجهاز', ''], ['scan', 'قارئ الباركود', 'يعمل مباشرة كلوحة مفاتيح', ''], ['user', 'شاشة العميل', 'شاشة ثانية على نفس الجهاز أو تابلت مربوط (Devices)', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span>${a ? `<button class="btn btn--soft btn--sm" data-test="${a}">${a === 'test-print' ? 'اطبع تجربة' : 'افتح'}</button>` : ''}</div>`).join('')}</div>
         <div class="card"><div class="card__h"><h3><span class="label">Data</span>البيانات</h3></div>
           <div class="set-row"><span><b>نسخة احتياطية</b><small>ملف فيه الإعدادات والموظفين والعملاء والمخزون وكل الأيام المؤرشفة (${days} يوم)</small></span><button class="btn btn--ghost btn--sm" id="backup">${I('download', 'sm')}${bi('Download', 'تنزيل')}</button></div>
+          <div class="set-row"><span><b>استرجاع نسخة احتياطية</b><small>يستبدل بيانات هذا الجهاز بملف نسخة سابقة — بموافقة المدير، وبعد تنزيل نسخة من الحالي</small></span><button class="btn btn--ghost btn--sm" id="restore">${I('refund', 'sm')}${bi('Restore', 'استرجاع')}</button></div>
           <div class="set-row"><span><b>وضع التدريب</b><small>نسخة منفصلة بطلبات تجريبية وجولات تفاعلية — لا تلمس أرقام المحل</small></span><button class="btn btn--ghost btn--sm" id="train">${I('play', 'sm')}${bi('Open', 'افتح')}</button></div>
           <div class="set-row"><span><b>مسح كل البيانات</b><small>يرجع النظام لأول تشغيل — للمدير فقط</small></span><button class="btn btn--danger btn--sm" id="wipe">${bi('Reset', 'مسح')}</button></div></div>
         ${prepCards()}
@@ -1677,7 +1699,8 @@
     $('#ln', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; D.log(me, 'settings', `كارت الولاء: كل ${b.dataset.n} مشروبات`); }, 'set'); renderSettingsLive(view); });
     $('#editStore', view).addEventListener('click', () => storeForm(() => renderSettingsLive(view)));
     $('#backup', view).addEventListener('click', backup);
-    $('#train', view).addEventListener('click', () => D.setTraining(true));
+    $('#restore', view).addEventListener('click', () => restoreFlow(false));
+    $('#train', view).addEventListener('click', () => { D.mutate(() => D.log(me, 'settings', 'تشغيل وضع التدريب من الإعدادات', null, 'warn'), 'set'); D.setTraining(true); });
     $('#wipe', view).addEventListener('click', wipeAll);
     if ($('#cloudBox', view) && window.DARJ_CONNECT) window.DARJ_CONNECT.panel($('#cloudBox', view), me);
     wirePrep(view, () => renderSettingsLive(view));
@@ -1713,6 +1736,53 @@
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `backup-${(D.STORE.nameEn || 'store').replace(/\s+/g, '-').toLowerCase()}-${S().day}.json`; a.click();
     D.mutate(() => D.log(me, 'settings', `تنزيل نسخة احتياطية (${archive.length} يوم مؤرشف)`), 'set');
+  }
+  // استرجاع نسخة احتياطية: على جهاز جديد من شاشة أول تشغيل، أو من الإعدادات بموافقة المدير
+  function restoreFlow(fresh) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,application/json';
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      let data = null;
+      try { data = JSON.parse(await f.text()); } catch (e) { /* */ }
+      openRestore(data, fresh);
+    });
+    inp.click();
+  }
+  function openRestore(data, fresh) {
+    const st = data && data.state;
+    const ok = data && data.app === 'DARJ' && st && st.v === 1 && st.live && st.setup && st.seq && st.settings && Array.isArray(st.orders) && Array.isArray(st.staff) && st.staff.some((u) => u.role === 'manager' && u.pin && !u.off);
+    if (!ok) { D.toast('الملف غير صالح', 'اختر ملف النسخة الاحتياطية الذي نُزّل من هذا النظام (backup-….json)', { warn: 1, ic: 'alert', ms: 6000 }); return null; }
+    const arch = Array.isArray(data.archive) ? data.archive.filter((d) => d && d.day) : [];
+    const when = data.exportedAt ? new Date(data.exportedAt).getTime() : 0;
+    const cur = S();
+    const row = (a, b) => `<div class="set-row"><span><b>${a}</b></span><span class="num">${b}</span></div>`;
+    const m = D.modal(`${D.head(bi('Restore backup', 'استرجاع نسخة احتياطية'), esc((st.store && st.store.nameAr) || data.store || ''))}
+      <div class="modal__b">
+        ${row('تاريخ النسخة', when ? `${D.dateArS(when)} · ${D.time(when)}` : '—')}
+        ${row('آخر فاتورة في النسخة', st.seq.inv ? D.invNo(st.seq.inv) : '—')}
+        ${row('الموظفون · العملاء', `${st.staff.length} · ${(st.customers || []).length}`)}
+        ${row('أيام مؤرشفة', arch.length)}
+        <div class="blind" style="color:var(--red);margin-top:12px">${I('alert', 'sm')}<span>${fresh ? 'ستُنقل بيانات النسخة إلى هذا الجهاز.' : `كل ما على هذا الجهاز الآن سيُستبدل ببيانات النسخة (آخر فاتورة هنا: ${cur.seq.inv ? D.invNo(cur.seq.inv) : '—'}). ستُنزَّل نسخة من البيانات الحالية أولًا.`} اكتب كلمة «استرجاع» للتأكيد.</span></div>
+        <input class="input" id="rTxt" style="margin-top:12px"></div>
+      <div class="modal__f"><button class="btn btn--ghost" data-close>${bi('Cancel', 'إلغاء')}</button><button class="btn btn--danger" id="rGo">${bi('Restore', 'استرجاع')}</button></div>`, { cls: 'modal--sm' });
+    let busy = false;
+    $('#rGo', m).addEventListener('click', async () => {
+      if (busy) return;
+      if ($('#rTxt', m).value.trim() !== 'استرجاع') { $('#rTxt', m).focus(); return; }
+      let appr = null;
+      if (!fresh) { appr = await D.approve('settings', 'استرجاع نسخة احتياطية', me); if (!appr) return; }
+      busy = true;
+      if (!fresh) await backup();
+      let failed = 0;
+      for (const d of arch) { try { await D.archive(d); } catch (e) { failed++; } }
+      st.log = (st.log || []).concat([{ ts: Date.now(), user: null, act: 'settings', txt: `استرجاع نسخة احتياطية بتاريخ ${when ? D.dateArS(when) : '—'} — أيام الأرشيف: ${arch.length - failed} من ${arch.length}${appr ? ' — بموافقة ' + appr.name : ''}`, appr: null, sev: 'warn' }]);
+      D.installState(st, true);
+      try { sessionStorage.removeItem('darj:me'); } catch (e) { /* */ }
+      if (!D.saved()) { D.toast('تعذّر حفظ النسخة على الجهاز', 'مساحة المتصفح لا تكفي — لم يتغيّر شيء', { warn: 1, ic: 'alert', ms: 5000 }); setTimeout(() => location.reload(), 4500); return; }
+      location.reload();
+    });
+    return m;
   }
   function wipeAll() {
     const m = D.modal(`${D.head(bi('Reset everything', 'مسح كل البيانات'), 'الفواتير والموظفين والعملاء والمخزون — لا يمكن التراجع')}
