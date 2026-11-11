@@ -10,6 +10,7 @@
 
   /* ---------- session ---------- */
   let me = null;
+  let autoLocked = false; // الشاشة اتقفلت لوحدها: جرس الطلبات الجديدة يفضل شغال
   try { me = sessionStorage.getItem('darj:me'); } catch (e) { /* */ }
   const can = (perm) => (me ? D.can(me, perm) : 0);
   const approverId = (u) => (u && u.id !== me ? u.id : null);
@@ -186,7 +187,7 @@
         const w = D.pinFail('login', null, `دخول باسم ${u.name}`); if (w) say(D.pinMsg(w));
         return;
       }
-      D.pinOk('login');
+      D.pinOk('login'); autoLocked = false;
       me = u.id; try { sessionStorage.setItem('darj:me', me); } catch (er) { /* */ }
       document.removeEventListener('keydown', key);
       D.mutate(() => D.log(me, 'login', `تسجيل دخول — كاشير 1 (${D.ROLES[u.role].ar})`), 'login');
@@ -377,9 +378,23 @@
       <span class="item__img" ${img ? `style="background-image:url('${img}')"` : ''}>${img ? '' : `<span class="item__ph">${I(c.ic)}</span>`}</span>
       <span class="item__b"><b>${esc(lang === 'en' ? p.en : p.ar)}</b><small>${esc(lang === 'en' ? p.ar : p.en)}</small><span class="item__p">${fmt(D.priceOf(s, p))}</span></span></button>`;
   }
+  // الأكثر طلبًا: من مبيعات آخر 14 يوم + النهارده، وبيظهر بعد ما يبقى فيه 4 أصناف اتباعت على الأقل
+  let topMemo = { at: 0, ids: [] };
+  function topIds() {
+    const now = Date.now();
+    if (now - topMemo.at < 30000) return topMemo.ids;
+    const s = S(); const n = {};
+    (s.days || []).slice(-14).forEach((d) => Object.entries(d.items || {}).forEach(([id, v]) => { n[id] = (n[id] || 0) + ((v && v.q) || 0); }));
+    D.today(s).forEach((o) => { if (o.status !== 'rejected' && !o.cancelled) o.lines.forEach((l) => { n[l.pid] = (n[l.pid] || 0) + l.qty; }); });
+    const ids = Object.keys(n).filter((id) => n[id] > 0 && id !== 'site_item' && D.has(id)).sort((a, b) => n[b] - n[a]).slice(0, 12);
+    topMemo = { at: now, ids: ids.length >= 4 ? ids : [] };
+    return topMemo.ids;
+  }
   function filtered() {
     const k = q.trim().toLowerCase();
-    return D.PRODUCTS.filter((p) => (cat === 'all' || p.cat === cat) && (!k || p.ar.includes(k) || p.en.toLowerCase().includes(k) || (p.code && p.code.includes(k))));
+    const hit = (p) => !k || p.ar.includes(k) || p.en.toLowerCase().includes(k) || (p.code && p.code.includes(k));
+    if (cat === 'top') { const ids = topIds(); if (ids.length) return ids.map((id) => D.prod(id)).filter(hit); cat = 'all'; }
+    return D.PRODUCTS.filter((p) => (cat === 'all' || p.cat === cat) && hit(p));
   }
   function drawItems() { const el = $('#items'); if (el) el.innerHTML = filtered().map(itemCard).join('') || `<div class="empty" style="grid-column:1/-1">${I('search')}<span>لا يوجد صنف بهذا الاسم</span></div>`; }
 
@@ -394,7 +409,7 @@
           <button class="btn btn--ghost" id="rfnd" title="مرتجع أو إلغاء طلب">${I('refund', 'sm')}${bi('Refund', 'مرتجع')}</button>
           <button class="btn btn--ghost btn--icon" id="more" title="أوامر الكاشير">${I('drawer')}</button>
         </div>
-        <div class="cats" id="cats"><button class="chip ${cat === 'all' ? 'on' : ''}" data-c="all">${bi('All', 'الكل')}</button>${D.CATS.map((c) => `<button class="chip ${cat === c.id ? 'on' : ''}" data-c="${c.id}">${bi(c.en, c.ar)}</button>`).join('')}</div>
+        <div class="cats" id="cats">${topIds().length ? `<button class="chip ${cat === 'top' ? 'on' : ''}" data-c="top">${I('flame', 'sm')}${bi('Top', 'الأكثر طلبًا')}</button>` : ''}<button class="chip ${cat === 'all' ? 'on' : ''}" data-c="all">${bi('All', 'الكل')}</button>${D.CATS.map((c) => `<button class="chip ${cat === c.id ? 'on' : ''}" data-c="${c.id}">${bi(c.en, c.ar)}</button>`).join('')}</div>
         <div class="items" id="items"></div>
         <button class="cart-fab" id="fab"></button>
       </div>
@@ -442,12 +457,15 @@
     addLine({ pid: p.id, qty: 1, mods: {} });
     D.toast('تمت قراءة الباركود', `${p.code} · ${p.ar}`, { ic: 'scan', ms: 2200 });
   }
+  // ضغطة واحدة تضيف الصنف لو كل إضافاته اختيارية (مفيش اختيار إجباري زي الحجم) — الإضافات والملاحظة من سطر الصنف في السلة.
+  // إعداد «اسأل عن الإضافات عند كل صنف» بيرجّع الطريقة القديمة.
+  const quickAdd = (p) => !S().settings.askMods && !p.mods.some((g) => D.MODS[g] && D.MODS[g].one);
   function pick(pid, el) {
     const s = S(); const p = D.prod(pid);
     if (s.avail[p.id] === false) { D.toast(`${p.ar} متوقف`, 'تم إيقافه من المنيو — يمكن إعادته من صفحة المنيو', { warn: 1 }); return; }
     if (!D.canMake(s, { pid, qty: 1, mods: D.defMods(p) })) { D.toast(`${p.ar} نفد`, 'نفد أحد مكوّناته من المخزون، فتوقف تلقائيًا', { warn: 1, ic: 'box' }); return; }
     if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
-    if (p.mods.length) openMods(p); else addLine({ pid, qty: 1, mods: {} });
+    if (p.mods.length && !quickAdd(p)) openMods(p); else addLine({ pid, qty: 1, mods: D.defMods(p) });
   }
   const sameLine = (a, b) => a.pid === b.pid && JSON.stringify(a.mods) === JSON.stringify(b.mods) && (a.note || '') === (b.note || '') && !a.disc && !b.disc && !a.reward && !b.reward;
   function addLine(line) {
@@ -535,7 +553,7 @@
     return `<div class="line${cart.fresh === l.key ? ' new' : ''}" data-i="${i}">
       <span class="line__name">${esc(lang === 'en' ? p.en : p.ar)}</span>
       <span class="line__price"><b>${fmt(tot)}</b>${gross !== tot ? `<s>${fmt(gross)}</s>` : ''}<span class="qty"><button data-q="-1">${I('minus', 'sm')}</button><span>${l.qty}</span><button data-q="1">${I('plus', 'sm')}</button></span></span>
-      <span class="line__mods">${mods.map((m) => `<span>${esc(m)}</span>`).join('')}${l.reward ? '<span class="disc">هدية الولاء</span>' : l.disc ? `<span class="disc">خصم ${l.disc}%</span>` : ''}${l.note ? `<span class="note">${esc(l.note)}</span>` : ''}</span>
+      <span class="line__mods">${mods.map((m) => `<span>${esc(m)}</span>`).join('')}${l.reward ? '<span class="disc">هدية الولاء</span>' : l.disc ? `<span class="disc">خصم ${l.disc}%</span>` : ''}${l.note ? `<span class="note">${esc(l.note)}</span>` : ''}${p.mods.length && !mods.length && !l.note && !l.reward && !l.disc && quickAdd(p) ? `<span class="more">${I('plus', 'sm')}${tr('إضافات أو ملاحظة', 'Add-ons / note')}</span>` : ''}</span>
     </div>`;
   }
   function openCartSheet(open) {
@@ -1014,8 +1032,11 @@
     if (!D.canRefund(o0)) { D.toast('لا يوجد ما يُرجع من هذا الطلب', o0.inv, { warn: 1 }); return; }
     const left = D.refundable(o0);
     const pick = o0.lines.map((l, i) => ({ i, q: preset.all ? left[i] : 0 }));
-    let step = 0, reason = preset.reason || null, how = 'original', retail = true, busy = false;
-    const online = o0.ch !== 'counter';
+    // المدفوع عند الكاشير (حتى لو الطلب جاي من الكشك أو المنيو) يرجع كاش من الدرج عادي — المدفوع أونلاين بيرجع بنفس طريقته
+    const online = o0.ch !== 'counter' && !o0.paidAt;
+    // إعداد المحل DARJ_CONFIG.refundTo = 'cash': المرتجع المعتاد كاش من الدرج، مش على جهاز الشبكة
+    const cashFirst = D.CFG.refundTo === 'cash';
+    let step = 0, reason = preset.reason || null, how = cashFirst && !online ? 'cash' : 'original', retail = true, busy = false;
     const STEPS = [['Items', 'الأصناف'], ['Reason', 'السبب'], ['Refund to', 'الاسترجاع'], ['Done', 'تم']];
     const m = D.modal(`${D.head(bi('Refund', 'مرتجع · ' + o0.inv), `طلب #${o0.no} · ${D.time(o0.ts)} · ${esc(D.staff(o0.staff).short)} · كاشير ${o0.reg}`)}<div class="modal__b"><div id="wst"></div><div id="wb"></div></div><div class="modal__f" id="wf"></div>`, { cls: 'modal--wide' });
     const sel = () => pick.filter((p) => p.q > 0);
@@ -1044,11 +1065,13 @@
         foot = `<button class="btn btn--ghost" id="wzBack">${bi('Back', 'السابق')}</button><button class="btn btn--ink btn--lg" id="wzNext" ${reason ? '' : 'disabled'}>${bi('Next', 'التالي')}</button>`;
       } else if (step === 2) {
         const orig = D.refundQuote(o, sel(), 'original');
-        const opts = [
-          { id: 'original', en: 'Original payment', ar: 'نفس طريقة الدفع', ic: 'card', sub: orig.parts.map((p) => D.PAY[p.m].ar + ' ' + fmt(p.a)).join(' + ') },
-          { id: 'cash', en: 'Cash', ar: 'كاش من الدرج', ic: 'cash', sub: 'الدرج يفتح', off: online },
-          { id: 'exchange', en: 'Exchange', ar: 'استبدال بصنف آخر', ic: 'swap', sub: 'رصيد للطلب الجديد', off: online },
-        ];
+        const onCard = orig.parts.some((p) => p.m !== 'cash');
+        const onTerm = orig.parts.some((p) => ['mada', 'apple', 'stc'].includes(p.m));
+        const oOrig = { id: 'original', en: 'Original payment', ar: 'نفس طريقة الدفع', ic: 'card', sub: orig.parts.map((p) => D.PAY[p.m].ar + ' ' + fmt(p.a)).join(' + ') + (D.LIVE && onTerm && !online ? ' · يدويًا على جهاز الشبكة' : '') };
+        const oCash = { id: 'cash', en: 'Cash', ar: 'كاش من الدرج', ic: 'cash', sub: 'الدرج يفتح', off: online };
+        const oEx = { id: 'exchange', en: 'Exchange', ar: 'استبدال بصنف آخر', ic: 'swap', sub: 'رصيد للطلب الجديد', off: o.ch !== 'counter' };
+        // الكاش أولًا لو ده المعتاد في المحل — و«نفس طريقة الدفع» تختفي لو الطلب أصلًا مدفوع كاش (نفس النتيجة)
+        const opts = cashFirst && !online ? [oCash].concat(onCard ? [oOrig] : [], [oEx]) : [oOrig, oCash, oEx];
         body = `<div class="wz-h"><span class="term-en">Refund to</span><span class="muted">${online ? 'طلب أونلاين — المبلغ يرجع لبطاقة العميل' : 'كيف ترجع الفلوس للعميل؟'}</span></div>
           <div class="picks">${opts.map((x) => `<button class="pickc${how === x.id ? ' on' : ''}" data-how="${x.id}" ${x.off ? 'disabled' : ''}>${I(x.ic)}${bi(x.en, x.ar)}<span class="sub">${esc(x.sub)}</span></button>`).join('')}</div>
           ${sumBox}
@@ -1096,7 +1119,7 @@
       const o = ord();
       $('#wst', m).innerHTML = stepper(STEPS, 4);
       const ex = how === 'exchange';
-      $('#wb', m).innerHTML = `<div class="wz"><div class="done-ok">${check(ex ? 'blue' : 'red')}<b style="font-size:18px">${bi(ex ? 'Credit ready' : o.cancelled ? 'Order cancelled' : 'Refunded', ex ? 'الرصيد جاهز للطلب الجديد' : o.cancelled ? 'أُلغي الطلب بالكامل' : 'تم المرتجع')}</b><span class="change">${fmt(r.a)} ر.س</span><span class="muted">${r.cn} · ${ex ? 'رصيد استبدال' : r.parts.map((p) => D.PAY[p.m].ar + ' ' + fmt(p.a)).join(' + ')}${r.back ? ' · عاد للمخزون' : ''}${r.waste ? ' · سُجّل هالك' : ''}${r.stamps ? ' · أُزيل ' + r.stamps + ' ختم' : ''}</span></div>
+      $('#wb', m).innerHTML = `<div class="wz"><div class="done-ok">${check(ex ? 'blue' : 'red')}<b style="font-size:18px">${bi(ex ? 'Credit ready' : o.cancelled ? 'Order cancelled' : 'Refunded', ex ? 'الرصيد جاهز للطلب الجديد' : o.cancelled ? 'أُلغي الطلب بالكامل' : 'تم المرتجع')}</b><span class="change">${fmt(r.a)} ر.س</span><span class="muted">${r.cn} · ${ex ? 'رصيد استبدال' : r.parts.map((p) => D.PAY[p.m].ar + ' ' + fmt(p.a)).join(' + ')}${r.back ? ' · عاد للمخزون' : ''}${r.waste ? ' · سُجّل هالك' : ''}${r.stamps ? ' · أُزيل ' + r.stamps + ' ختم' : ''}</span>${D.LIVE && !ex && r.parts.some((p) => ['mada', 'apple', 'stc'].includes(p.m)) ? `<div class="blind" style="margin-top:10px;color:var(--amber);text-align:start">${I('card', 'sm')}<span><b>Refund on the terminal · رجّع المبلغ على جهاز الشبكة:</b> ${r.parts.filter((p) => ['mada', 'apple', 'stc'].includes(p.m)).map((p) => `${fmt(p.a)} ر.س ${D.PAY[p.m].ar}`).join(' + ')} — النظام لا يرجّع مبلغ البطاقة تلقائيًا.</span></div>` : ''}</div>
         <div class="rc-stage">${D.creditHTML(o, r, { print: true })}</div></div>`;
       $('#wf', m).innerHTML = `<button class="btn btn--ghost" id="pc">${I('print', 'sm')}${bi('Print', 'اطبع الإشعار')}</button>${ex ? `<button class="btn btn--go btn--lg" id="pickNew">${I('swap', 'sm')}${bi('Pick the new item', 'اختر البديل')}</button>` : `<button class="btn btn--ink" data-x>${bi('Done', 'تم')}</button>`}`;
       $('#pc', m).addEventListener('click', () => D.print(D.creditHTML(o, r)));
@@ -1192,8 +1215,11 @@
     const m = D.modal(`${D.head(bi('Close shift', 'إقفال الوردية'), 'عدّ النقد الموجود في الدرج — لن يظهر المبلغ المتوقع إلا بعد انتهاء العدّ')}
       <div class="modal__b" id="cb"></div>`, { cls: 'modal--wide', sticky: true });
     const counted = () => D.r2(DENOMS.reduce((a, d) => a + d * (cnt[d] || 0), 0));
+    const held = (s.holds || []).length;
+    const unpaid = s.orders.filter((o) => o.unpaid && !o.cancelled && !['rejected', 'cancelled'].includes(o.status)).length;
+    const openWarn = held || unpaid ? `<div class="blind" style="margin-bottom:12px;color:var(--amber)">${I('alert', 'sm')}<span><b>Before you close · قبل الإقفال:</b> ${[held ? `${held} طلب معلّق في السلة` : '', unpaid ? `${unpaid} طلب لم يُحصَّل بعد` : ''].filter(Boolean).join(' · ')}. يمكنك المتابعة، وستبقى هذه الطلبات مفتوحة للوردية التالية.</span></div>` : '';
     function step1() {
-      $('#cb', m).innerHTML = `${stepper([['Count', 'العدّ'], ['Compare', 'المقارنة'], ['Z report', 'التقرير']], 0)}<div class="blind" style="margin-bottom:12px">${I('eyeoff', 'sm')} <b>Blind close · قفل أعمى:</b> اكتب عدد كل فئة. المبلغ المتوقع مخفي ليكون العدّ حقيقيًا.</div>
+      $('#cb', m).innerHTML = `${stepper([['Count', 'العدّ'], ['Compare', 'المقارنة'], ['Z report', 'التقرير']], 0)}${openWarn}<div class="blind" style="margin-bottom:12px">${I('eyeoff', 'sm')} <b>Blind close · قفل أعمى:</b> اكتب عدد كل فئة. المبلغ المتوقع مخفي ليكون العدّ حقيقيًا.</div>
         <div class="denoms">${DENOMS.map((d) => `<label class="denom${cnt[d] ? ' has' : ''}">${d >= 5 ? `<span class="note-art" style="background:${NOTE[d]}">${d}</span>` : `<span class="coin-art">${d >= 1 ? d : d === .5 ? '½' : '¼'}</span>`}<input inputmode="numeric" data-d="${d}" value="${cnt[d] || ''}" placeholder="0" aria-label="عدد فئة ${d}"></label>`).join('')}</div>
         <div class="grid g2" style="margin-top:14px;align-items:center"><div class="pay__due"><span class="label">Counted cash</span><span id="ct">${money(counted())}</span></div>
         <div class="blind">${I('card', 'sm')} مدى وApple Pay وSTC Pay: <b>${fmt(st.by.mada + st.by.apple + st.by.stc)} ر.س</b> — ${D.LIVE ? 'طابقها مع تسوية جهاز الشبكة' : 'من تسوية جهاز الشبكة تلقائيًا'}</div></div>
@@ -1226,13 +1252,16 @@
   }
   function openShiftFlow() {
     const m = D.modal(`${D.head('فتح وردية جديدة', `${esc(D.staff(me).name)} · كاشير 1`)}
-      <div class="modal__b"><label class="field"><span>عهدة البداية (الفكّة في الدرج)</span><input class="input amount-in" id="fl" inputmode="decimal" value="500"></label></div>
+      <div class="modal__b"><label class="field"><span>عهدة البداية (الفكّة في الدرج)</span><input class="input amount-in" id="fl" inputmode="decimal" value="${D.REAL ? '' : '500'}" placeholder="0.00"></label><div id="flErr"></div></div>
       <div class="modal__f"><button class="btn btn--ghost" data-close>إلغاء</button><button class="btn btn--go" id="ok">افتح الوردية</button></div>`, { cls: 'modal--sm' });
     $('#ok', m).addEventListener('click', () => {
-      const f = parseFloat($('#fl', m).value) || 0;
+      const raw = $('#fl', m).value.trim();
+      if (D.REAL && (raw === '' || isNaN(parseFloat(raw)))) { $('#flErr', m).innerHTML = `<div class="blind" style="color:var(--red);margin-top:10px">${I('alert', 'sm')}<span>اكتب مبلغ الفكّة الموجود في الدرج الآن — واكتب 0 لو الدرج فارغ</span></div>`; $('#fl', m).focus(); return; }
+      const f = parseFloat(raw) || 0;
       D.mutate((s) => { if (D.openShift(s, 1)) return; s.shifts.push({ id: 'sh' + D.uid(), reg: 1, user: me, open: Date.now(), float: f, close: null }); D.log(me, 'shift', `فتح وردية بعهدة ${fmt(f)} ر.س`); }, 'shift');
       m.close(); D.drawerPop('فُتح الدرج — ضع العهدة'); render();
     });
+    setTimeout(() => { const i = $('#fl', m); if (i) { i.focus(); i.select(); } }, 60);
   }
 
   /* =====================================================================
@@ -1683,6 +1712,8 @@
           <div class="set-row"><span><b>قبول تلقائي لطلبات المنيو</b><small>تصل للباريستا مباشرة</small></span>${sw('autoAccept', s.settings.autoAccept)}</div>
           <div class="set-row"><span><b>صوت التنبيهات</b><small>طلب جديد، طلب جاهز، قارئ الباركود</small></span>${sw('sound', s.settings.sound)}</div>
           <div class="set-row"><span><b>طباعة الفاتورة تلقائيًا</b><small>من نافذة الطباعة على الطابعة الحرارية 80مم</small></span>${sw('printer', s.settings.printer)}</div>
+          <div class="set-row"><span><b>اسأل عن الإضافات عند كل صنف</b><small>لو مقفول: الضغطة تضيف الصنف مباشرة، والإضافات والملاحظة من سطر الصنف في الطلب</small></span>${sw('askMods', s.settings.askMods)}</div>
+          <div class="set-row"><span><b>قفل تلقائي</b><small>يقفل الشاشة بعد مدة بدون استخدام ويطلب PIN — الطلب المفتوح لا يتأثر</small></span><div class="seg" id="al">${[0, 2, 5, 10].map((n) => `<button data-n="${n}" class="${+(s.settings.autoLock || 0) === n ? 'on' : ''}">${n ? n + ' د' : 'Off'}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>كارت الولاء</b><small>عدد المشروبات مقابل مشروب هدية</small></span><div class="seg" id="ln">${[5, 6, 8, 10].map((n) => `<button data-n="${n}" class="${s.settings.loyalNeed === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>حد خصم الكاشير</b><small>ما يزيد عن ذلك يحتاج موافقة المشرف</small></span><span class="pill">10%</span></div></div>
         <div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
@@ -1699,6 +1730,7 @@
     $('#ln', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; D.log(me, 'settings', `كارت الولاء: كل ${b.dataset.n} مشروبات`); }, 'set'); renderSettingsLive(view); });
     $('#editStore', view).addEventListener('click', () => storeForm(() => renderSettingsLive(view)));
     $('#backup', view).addEventListener('click', backup);
+    $('#al', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; const n = +b.dataset.n; D.mutate((st) => { st.settings.autoLock = n; D.log(me, 'settings', n ? `قفل تلقائي بعد ${n} دقائق` : 'إيقاف القفل التلقائي'); }, 'set'); renderSettingsLive(view); });
     $('#restore', view).addEventListener('click', () => restoreFlow(false));
     $('#train', view).addEventListener('click', () => { D.mutate(() => D.log(me, 'settings', 'تشغيل وضع التدريب من الإعدادات', null, 'warn'), 'set'); D.setTraining(true); });
     $('#wipe', view).addEventListener('click', wipeAll);
@@ -1979,14 +2011,24 @@
   const TOURS = [
     { id: 'sell', en: 'Sell a coffee', ar: 'اطلب قهوة وادفع بالبطاقة', ic: 'cup', min: 1,
       setup() { ensureShift(); freshCart(); toSell(); },
-      steps: [
-        { sel: `[data-p="${TP.drink}"]`, en: 'Pick', ar: `اضغط على «${TP.drinkName}» — كل صنف بصورته وسعره.`, wait: () => has('.modal .mod-hero') },
-        { sel: `.modal [data-o="${TP.mod}"]`, en: 'Customize', ar: `اختر ${TP.modName}، والسعر يتحدّث تلقائيًا.`, wait: () => has(`.modal [data-o="${TP.mod}"].on`) },
-        { sel: '.modal #add', en: 'Add', ar: 'أضف الصنف للطلب.', wait: () => !has('.ovl') && cart.lines.length > 0 },
+      get steps() {
+        const custom = { sel: `.modal [data-o="${TP.mod}"]`, en: 'Customize', ar: `اختر ${TP.modName}، والسعر يتحدّث تلقائيًا.`, wait: () => has(`.modal [data-o="${TP.mod}"].on`) };
+        const first = quickAdd(D.prod(TP.drink)) ? [
+          { sel: `[data-p="${TP.drink}"]`, en: 'Pick', ar: `اضغط على «${TP.drinkName}» — يُضاف للطلب بضغطة واحدة.`, wait: () => cart.lines.length > 0 },
+          { sel: '#lines .line', en: 'Open item', ar: 'اضغط على الصنف في الطلب لتضيف إضافات أو ملاحظة.', wait: () => has('.modal .mod-hero') },
+          custom,
+          { sel: '.modal #add', en: 'Save', ar: 'احفظ التعديل.', wait: () => !has('.ovl') && cart.lines.length > 0 },
+        ] : [
+          { sel: `[data-p="${TP.drink}"]`, en: 'Pick', ar: `اضغط على «${TP.drinkName}» — كل صنف بصورته وسعره.`, wait: () => has('.modal .mod-hero') },
+          custom,
+          { sel: '.modal #add', en: 'Add', ar: 'أضف الصنف للطلب.', wait: () => !has('.ovl') && cart.lines.length > 0 },
+        ];
+        return first.concat([
         { sel: '#pay', en: 'Charge', ar: 'اضغط Charge للدفع.', wait: () => has('.modal .tenders') },
         { sel: '.modal #take', en: D.LIVE ? 'Confirm paid' : 'Send to terminal', ar: D.LIVE ? 'اكتب المبلغ على جهاز مدى، وبعد الموافقة اضغط هنا.' : 'المبلغ يُرسل لجهاز مدى تلقائيًا، بدون كتابة يدوية.', wait: () => has('.modal .rc-stage') },
         { sel: '.modal .rc-stage .receipt', en: 'Receipt', ar: D.vatOn() ? 'الفاتورة الضريبية بـQR هيئة الزكاة، والطلب وصل لشاشة الباريستا.' : 'الإيصال جاهز، والطلب وصل لشاشة الباريستا.', next: 1 },
-      ] },
+        ]);
+      } },
     { id: 'split', en: 'Split the bill', ar: 'جزء بالبطاقة والباقي كاش', ic: 'card', min: 1,
       setup() { ensureShift(); freshCart(); addQuick(TP.drink); addQuick(TP.dessert); toSell(); },
       steps: [
@@ -2005,7 +2047,7 @@
         { sel: '.modal #wzNext', en: 'Next', ar: 'التالي.', wait: () => has('.modal [data-reason]') },
         { sel: '.modal .picks', en: 'Reason', ar: 'اختر السبب — وتحته يظهر ماذا يحدث للمخزون تلقائيًا.', wait: () => has('.modal [data-reason].on') },
         { sel: '.modal #wzNext', en: 'Next', ar: 'التالي.', wait: () => has('.modal [data-how]') },
-        { sel: '.modal .picks', en: 'Refund to', ar: 'نفس طريقة الدفع، أو كاش، أو استبدال بصنف آخر. ثم Next.', next: 1 },
+        { sel: '.modal .picks', en: 'Refund to', ar: D.CFG.refundTo === 'cash' ? 'المعتاد كاش من الدرج — ومتاح نفس طريقة الدفع أو استبدال بصنف آخر. ثم Next.' : 'نفس طريقة الدفع، أو كاش، أو استبدال بصنف آخر. ثم Next.', next: 1 },
         { sel: '.modal #wzGo', en: 'Approve', ar: 'نفّذ المرتجع. الكاشير يحتاج PIN المشرف.', wait: () => has('.modal .chk') },
         { sel: '.modal .rc-stage .receipt', en: 'Credit note', ar: D.noteName().ar + ' مرتبط بالفاتورة، والصنف شُطب عند الباريستا.', next: 1 },
       ] },
@@ -2040,7 +2082,12 @@
         { sel: '#redeem', en: 'Use free drink', ar: 'استخدم الهدية — المشروب الأرخص يصبح مجانًا.', wait: () => cart.lines.some((l) => l.reward) },
         { sel: '.cart__cust', en: 'Stamps', ar: 'كل مشروب = ختم، والهدية تُحسب تلقائيًا بدون بطاقات ورقية.', next: 1 },
       ] },
-    { id: 'approve', en: 'Supervisor approval', ar: 'حذف صنف يحتاج PIN', ic: 'shield', min: 1,
+    D.can({ role: 'cashier' }, 'void') === 1 ? { id: 'approve', en: 'Delete an item', ar: 'احذف صنفًا من الطلب قبل الدفع', ic: 'trash', min: 1,
+      setup() { ensureShift(); freshCart(); addQuick(TP.food); addQuick(TP.food2); toSell(); },
+      steps: [
+        { sel: '.line[data-i="1"] [data-q="-1"]', en: 'Delete an item', ar: 'احذف صنفًا من السلة — بدون PIN.', wait: () => cart.lines.length < 2 },
+        { sel: '#lines', en: 'Logged', ar: 'الحذف تم، ومسجّل في سجل الحركات: من حذف، وماذا، ومتى.', next: 1 },
+      ] } : { id: 'approve', en: 'Supervisor approval', ar: 'حذف صنف يحتاج PIN', ic: 'shield', min: 1,
       setup() { ensureShift(); freshCart(); addQuick(TP.food); addQuick(TP.food2); toSell(); },
       steps: [
         { sel: '.line[data-i="1"] [data-q="-1"]', en: 'Delete an item', ar: 'احذف صنفًا من السلة.', wait: () => has('.pin__dots') || cart.lines.length < 2 },
@@ -2207,7 +2254,18 @@
     shell();
     D.on(onChange);
     setInterval(() => { if (me) chrome(); }, 30000);
-    D.alertLoop(() => !!me && S().orders.some((o) => o.status === 'new'));
+    D.alertLoop(() => (!!me || autoLocked) && S().orders.some((o) => o.status === 'new'));
+    // قفل تلقائي بعد مدة من غير استخدام (من الإعدادات) — السلة بتفضل زي ما هي، وشاشة التحضير مابتتقفلش
+    let lastAct = Date.now();
+    ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
+    setInterval(() => {
+      const mins = D.REAL ? +(S().settings.autoLock || 0) : 0;
+      if (!mins || !me || route === 'kds' || document.querySelector('.lock, .ovl, .tour')) return;
+      if (Date.now() - lastAct < mins * 60000) return;
+      D.mutate(() => D.log(me, 'login', `قفل تلقائي بعد ${mins} دقائق بدون استخدام`), 'logout');
+      me = null; autoLocked = true; try { sessionStorage.removeItem('darj:me'); } catch (er) { /* */ }
+      closePops(); lockScreen(route);
+    }, 10000);
     if (!me || (D.REAL && !S().setup) || (me && !D.STAFF.some((u) => u.id === me))) { me = null; render(); lockScreen(); } else { render(); if (wantGuide && !D.REAL) setTimeout(openGuide, 700); }
     window.addEventListener('hashchange', () => { const r = location.hash.slice(1); if (r !== route && VIEWS[r]) { const rr = ROUTES.find((x) => x.id === r); if (can(rr.perm)) { route = r; render(); } } });
   }

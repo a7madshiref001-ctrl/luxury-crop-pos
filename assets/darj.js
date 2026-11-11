@@ -69,6 +69,8 @@
     { id: 'team', ar: 'الموظفين والصلاحيات وسجل الحركات', cashier: 0, supervisor: 0, manager: 1, barista: 0 },
     { id: 'settings', ar: 'الإعدادات والأجهزة', cashier: 0, supervisor: 0, manager: 1, barista: 0 },
   ];
+  // سياسة العميل ممكن تغيّر الصلاحيات الافتراضية — مثال: DARJ_CONFIG.perms = { void: { cashier: 1 } }
+  Object.keys(CFG.perms || {}).forEach((id) => { const p = D.PERMS.find((x) => x.id === id); if (p) Object.assign(p, CFG.perms[id]); });
   D.can = (u, perm) => {
     const p = D.PERMS.find((x) => x.id === perm);
     const user = typeof u === 'string' ? D.staff(u) : u;

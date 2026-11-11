@@ -311,6 +311,9 @@ kbd{display:inline-flex;align-items:center;height:18px;padding:0 5px;border-radi
 .line__mods span{font-size:11px;padding:1px 7px;border-radius:6px;background:var(--paper-2);color:var(--ink-2)}
 .line__mods span.disc{background:var(--go-50);color:var(--go-ink)}
 .line__mods span.note{background:var(--amber-50);color:var(--amber)}
+.line__mods span.more{display:inline-flex;align-items:center;gap:3px;background:none;border:1px dashed var(--line);color:var(--muted)}
+.line__mods span.more svg{width:11px;height:11px}
+@media (min-width:901px){.sell .cats{flex-wrap:wrap;overflow:visible;row-gap:6px}.sell .cats .chip{height:34px;padding:0 12px}}
 .line__price{grid-row:1/3;grid-column:2;text-align:end;display:grid;align-content:start;gap:6px;justify-items:end}
 .line__price b{font-family:var(--f-en);font-weight:700;font-size:14px}
 .line__price s{font-family:var(--f-en);font-size:11.5px;color:var(--muted)}
