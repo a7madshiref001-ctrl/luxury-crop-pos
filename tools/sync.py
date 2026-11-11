@@ -2,7 +2,7 @@
 import io, os, re, shutil
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.abspath(os.path.join(ROOT, '..', 'darj-pos'))
-V = '9'
+V = '10'
 
 for f in ['darj.css', 'darj.js', 'app.js', 'kds.js', 'link.js', 'kiosk.js']:
     shutil.copy(os.path.join(SRC, 'assets', f), os.path.join(ROOT, 'assets', f))

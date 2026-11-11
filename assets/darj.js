@@ -994,45 +994,84 @@
   };
 
   /* ---------- receipts ---------- */
+  // شكل الفاتورة: القالب والمقاس والهوامش والمحتوى — من Settings ← Receipt، ومحفوظ في settings.rc
+  D.RC_TPLS = [
+    { id: 'classic', en: 'Classic', ar: 'الكلاسيكي', sub: 'كل شيء في المنتصف وخطوط متقطعة', set: { sep: 'dash', bigNo: false, itemEn: true, addr: true, cr: true, cur: true } },
+    { id: 'modern', en: 'Modern', ar: 'العصري', sub: 'رقم الطلب كبير والإجمالي في شريط أسود', set: { sep: 'solid', bigNo: true, itemEn: true, addr: true, cr: true, cur: true } },
+    { id: 'table', en: 'Table', ar: 'الجدول', sub: 'الصنف والكمية والسعر في أعمدة', set: { sep: 'solid', bigNo: false, itemEn: true, addr: true, cr: true, cur: true } },
+    { id: 'compact', en: 'Compact', ar: 'المختصر', sub: 'أقصر فاتورة ممكنة — توفّر الورق', set: { sep: 'dash', bigNo: false, itemEn: false, addr: false, cr: false, cur: false } },
+  ];
+  D.RC_DEF = { tpl: 'classic', w: 80, mx: 4, mt: 5, mb: 6, fs: 12, sep: 'dash', heavy: false, logo: false, logoW: 24, img: '', nameEn: true, addr: true, phone: true, cr: true, bigNo: false, cashier: true, type: true, itemEn: true, cur: true, loyal: true, thanks: true, head: '', foot: '', note: '' };
+  D.RC_LIM = { w: [40, 120], mx: [0, 15], mt: [0, 30], mb: [0, 40], fs: [8, 18], logoW: [10, 60] };
+  D.rc = (over) => {
+    const st = D.state();
+    const r = Object.assign({}, D.RC_DEF, CFG.receipt || {}, (st && st.settings && st.settings.rc) || {}, over || {});
+    Object.entries(D.RC_LIM).forEach(([k, [lo, hi]]) => { const n = +r[k]; r[k] = Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : D.RC_DEF[k]; });
+    if (!D.RC_TPLS.some((t) => t.id === r.tpl)) r.tpl = 'classic';
+    if (!['dash', 'solid', 'none'].includes(r.sep)) r.sep = 'dash';
+    return r;
+  };
+  const rcOpen = (r, opt) => `<div class="receipt${opt && opt.print ? ' print' : ''} rc--${r.tpl} rc-sep--${r.sep}${r.heavy ? ' rc--heavy' : ''}" style="--rc-w:${r.w};--rc-mx:${r.mx};--rc-mt:${r.mt};--rc-mb:${r.mb};--rc-fs:${r.fs}">`;
+  const rcHead = (r, full) => {
+    const src = r.img || (CFG.brand && CFG.brand.mark) || '';
+    const en = r.nameEn && D.STORE.nameEn;
+    return `<div class="rc-logo rc-c">${r.logo && src ? `<img class="rc-img" src="${D.esc(src)}" style="width:${r.logoW}mm" alt="">` : ''}${en ? `<b>${D.esc(D.STORE.nameEn)}</b>` : ''}<span${en ? '' : ' class="rc-big"'}>${D.esc(D.STORE.sellerAr)}</span>${full && r.addr && D.STORE.addr ? `<small>${D.esc(D.STORE.addr)}</small>` : ''}</div>`;
+  };
   D.receiptHTML = (o, opt) => {
     opt = opt || {};
     const s = D.state();
+    const r = D.rc(opt.rc);
     const z = D.tlv(o);
     const c = D.calc(s, o.lines, o.disc);
     const vatOn = D.orderVat(o);
-    const lines = o.lines.map((l) => {
-      const p = D.prod(l.pid);
+    const table = r.tpl === 'table', compact = r.tpl === 'compact', wide = r.w >= 70;
+    const subOf = (l, p) => {
       const mods = D.modText(l).join(' · ');
-      return `<div class="rc-line"><b>${l.qty} × ${D.esc(p.ar)}</b><span class="p">${D.fmt(l.total)}</span><small>${D.esc(p.en)}${mods ? ' — ' + D.esc(mods) : ''}${l.reward ? ' · هدية الولاء' : l.disc ? ` · خصم ${l.disc}%` : ''}</small></div>`;
+      const a = [r.itemEn ? D.esc(p.en) : '', D.esc(mods)].filter(Boolean).join(' — ');
+      return [a, l.reward ? 'هدية الولاء' : l.disc ? `خصم ${l.disc}%` : ''].filter(Boolean).join(' · ');
+    };
+    const lines = o.lines.map((l) => {
+      const p = D.prod(l.pid); const sub = subOf(l, p);
+      if (table) return `<div class="rc-tr${wide ? '' : ' rc-t3'}"><b>${D.esc(p.ar)}</b><span>${l.qty}</span>${wide ? `<span>${D.fmt(l.total / l.qty)}</span>` : ''}<span>${D.fmt(l.total)}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+      return `<div class="rc-line"><b>${l.qty} × ${D.esc(p.ar)}</b><span class="p">${D.fmt(l.total)}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
     }).join('');
     const pays = o.pays.map((p) => `<div class="rc-kv"><span>${D.PAY[p.m].ar}</span><span>${D.fmt(p.a)}</span></div>`).join('');
     const st = o.cust ? s.customers.find((x) => x.id === o.cust) : null;
-    return `<div class="receipt${opt.print ? ' print' : ''}">
-      <div class="rc-logo rc-c"><b>${D.STORE.nameEn}</b><span>${D.STORE.sellerAr}</span><small>${D.STORE.addr}</small></div>
-      ${D.TRAIN ? '<div class="rc-c rc-t">— تدريب · Training —</div>' : ''}
-      <div class="rc-c">${vatOn && D.STORE.vat ? `<div>الرقم الضريبي: <span class="mono">${D.STORE.vat}</span></div>` : ''}${D.STORE.cr ? `<div>س.ت: <span class="mono">${D.STORE.cr}</span></div>` : ''}${D.STORE.phone ? `<div>هاتف: <span class="mono">${D.esc(D.STORE.phone)}</span></div>` : ''}</div>
-      <hr class="rc-hr"><div class="rc-c rc-t">${vatOn ? 'فاتورة ضريبية مبسطة' : 'إيصال بيع'}<br><span class="mono" style="font-weight:500;font-size:11px">${vatOn ? 'Simplified Tax Invoice' : 'Sales Receipt'}</span></div><hr class="rc-hr">
-      <div class="rc-kv"><span>رقم الفاتورة</span><span>${o.inv}</span></div>
+    const who = o.ch === 'kiosk' && !o.staff ? 'الكشك · دفع ذاتي' : `${D.esc(D.staff(o.staff).short)} · كاشير ${o.reg}`;
+    const kind = `${o.ch !== 'counter' ? D.CH[o.ch].ar : D.TYPES[o.type].ar}${o.table ? ' ' + D.esc(o.table) : ''}`;
+    const info = `${vatOn && D.STORE.vat ? `<div>الرقم الضريبي: <span class="mono">${D.esc(D.STORE.vat)}</span></div>` : ''}${r.cr && D.STORE.cr ? `<div>س.ت: <span class="mono">${D.esc(D.STORE.cr)}</span></div>` : ''}${r.phone && D.STORE.phone ? `<div>هاتف: <span class="mono">${D.esc(D.STORE.phone)}</span></div>` : ''}${r.head ? `<div dir="auto">${D.esc(r.head)}</div>` : ''}`;
+    const meta = compact
+      ? `<div class="rc-c rc-meta"><span class="mono">${o.inv}${r.bigNo ? '' : ' · #' + o.no}</span><br><span class="mono">${D.dateNum(o.ts)} ${D.time24(o.ts)}</span>${r.cashier || r.type ? `<br>${[r.cashier ? who : '', r.type ? kind : ''].filter(Boolean).join(' · ')}` : ''}</div>`
+      : `<div class="rc-kv"><span>رقم الفاتورة</span><span>${o.inv}</span></div>
       <div class="rc-kv"><span>التاريخ</span><span>${D.dateNum(o.ts)} ${D.time24(o.ts)}</span></div>
-      <div class="rc-kv"><span>رقم الطلب</span><span>#${o.no}</span></div>
-      <div class="rc-kv"><span>الكاشير</span><span style="font-family:var(--f)">${o.ch === 'kiosk' && !o.staff ? 'الكشك · دفع ذاتي' : `${D.esc(D.staff(o.staff).short)} · كاشير ${o.reg}`}</span></div>
-      <div class="rc-kv"><span>نوع الطلب</span><span style="font-family:var(--f)">${o.ch !== 'counter' ? D.CH[o.ch].ar : D.TYPES[o.type].ar}${o.table ? ' ' + o.table : ''}</span></div>
-      <hr class="rc-hr">${lines}<hr class="rc-hr">
+      ${r.bigNo ? '' : `<div class="rc-kv"><span>رقم الطلب</span><span>#${o.no}</span></div>`}
+      ${r.cashier ? `<div class="rc-kv"><span>الكاشير</span><span style="font-family:var(--f)">${who}</span></div>` : ''}
+      ${r.type ? `<div class="rc-kv"><span>نوع الطلب</span><span style="font-family:var(--f)">${kind}</span></div>` : ''}`;
+    return `${rcOpen(r, opt)}
+      ${rcHead(r, true)}
+      ${D.TRAIN ? '<div class="rc-c rc-t">— تدريب · Training —</div>' : ''}${opt.sample ? '<div class="rc-c rc-t">— تجربة شكل · Sample —</div>' : ''}
+      ${info ? `<div class="rc-c">${info}</div>` : ''}
+      <hr class="rc-hr"><div class="rc-c rc-t">${vatOn ? 'فاتورة ضريبية مبسطة' : 'إيصال بيع'}${compact ? '' : `<br><span class="mono rc-sub">${vatOn ? 'Simplified Tax Invoice' : 'Sales Receipt'}</span>`}</div><hr class="rc-hr">
+      ${r.bigNo ? `<div class="rc-no"><small>رقم الطلب · Order</small><b>#${o.no}</b></div>` : ''}
+      ${meta}
+      <hr class="rc-hr">${table ? `<div class="rc-th${wide ? '' : ' rc-t3'}"><span>الصنف</span><span>الكمية</span>${wide ? '<span>السعر</span>' : ''}<span>الإجمالي</span></div>` : ''}${lines}<hr class="rc-hr">
       ${c.lineDisc ? `<div class="rc-kv"><span>خصم الأصناف</span><span>-${D.fmt(c.lineDisc)}</span></div>` : ''}
       ${c.disc ? `<div class="rc-kv"><span>خصم الفاتورة${o.disc.type === 'pct' ? ' ' + o.disc.v + '%' : ''}</span><span>-${D.fmt(c.disc)}</span></div>` : ''}
       ${vatOn ? `<div class="rc-kv"><span>الإجمالي قبل الضريبة</span><span>${D.fmt(o.net)}</span></div>
       <div class="rc-kv"><span>ضريبة القيمة المضافة 15%</span><span>${D.fmt(o.vat)}</span></div>` : ''}
-      <div class="rc-kv rc-tot"><span>${vatOn ? 'الإجمالي شامل الضريبة' : 'الإجمالي'}</span><span>${D.fmt(o.total)}</span></div><div class="rc-c" style="font-size:10px;color:#666">المبالغ بالريال السعودي</div>
+      <div class="rc-kv rc-tot"><span>${vatOn ? 'الإجمالي شامل الضريبة' : 'الإجمالي'}</span><span>${D.fmt(o.total)}</span></div>${r.cur ? '<div class="rc-c rc-cur">المبالغ بالريال السعودي</div>' : ''}
       <hr class="rc-hr">${pays}${o.cash ? `<div class="rc-kv"><span>المدفوع كاش</span><span>${D.fmt(o.cash.tendered)}</span></div><div class="rc-kv"><span>الباقي</span><span>${D.fmt(o.cash.change)}</span></div>` : ''}
-      ${o.refunds && o.refunds.length ? `<hr class="rc-hr">${o.refunds.map((r) => `<div class="rc-kv"><span>${D.noteName(o).ar} ${r.cn}</span><span>-${D.fmt(r.a)}</span></div>`).join('')}` : ''}
+      ${o.refunds && o.refunds.length ? `<hr class="rc-hr">${o.refunds.map((x) => `<div class="rc-kv"><span>${D.noteName(o).ar} ${x.cn}</span><span>-${D.fmt(x.a)}</span></div>`).join('')}` : ''}
       ${vatOn ? `<div class="rc-qr">${D.qrSVG(z.b64)}<small>امسح للتحقق — هيئة الزكاة والضريبة والجمارك</small></div>` : ''}
-      ${st ? `<div class="rc-foot">${D.esc(st.name.split(' ')[0])}، رصيدك ${st.stamps} من ${s.settings.loyalNeed} أختام${st.rewards ? ` · لديك ${st.rewards} مشروب هدية` : ''}</div>` : ''}
-      <div class="rc-foot">${D.esc(CFG.thanks || 'شكرًا لزيارتكم')} ${opt.copy ? '· <b>نسخة</b>' : ''}${CFG.poweredBy === false ? '' : '<br>Powered by <b>DARJ</b>'}</div>
+      ${st && r.loyal ? `<div class="rc-foot">${D.esc(st.name.split(' ')[0])}، رصيدك ${st.stamps} من ${s.settings.loyalNeed} أختام${st.rewards ? ` · لديك ${st.rewards} مشروب هدية` : ''}</div>` : ''}
+      ${r.note ? `<div class="rc-foot" dir="auto">${D.esc(r.note)}</div>` : ''}
+      <div class="rc-foot">${r.thanks ? D.esc(r.foot || CFG.thanks || 'شكرًا لزيارتكم') : ''} ${opt.copy ? '· <b>نسخة</b>' : ''}${CFG.poweredBy === false ? '' : '<br>Powered by <b>DARJ</b>'}</div>
     </div>`;
   };
   D.creditHTML = (o, r, opt) => {
     opt = opt || {};
     const s = D.state();
+    const rc = D.rc();
     const iso = new Date(r.ts).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const vatOn = D.orderVat(o);
     const enc = new TextEncoder(); const bytes = [];
@@ -1040,10 +1079,10 @@
     let bin = ''; bytes.forEach((b) => { bin += String.fromCharCode(b); });
     const rows = r.lines.map(({ i, q }) => { const l = o.lines[i]; const p = D.prod(l.pid); return `<div class="rc-line"><b>${q} × ${D.esc(p.ar)}</b><span class="p">${D.fmt(l.total / l.qty * q)}</span><small>${D.esc(p.en)}${l.reward ? ' · هدية الولاء' : ''}</small></div>`; }).join('');
     const kv = (a, b) => `<div class="rc-kv"><span>${a}</span><span>${b}</span></div>`;
-    return `<div class="receipt${opt.print ? ' print' : ''}">
-      <div class="rc-logo rc-c"><b>${D.STORE.nameEn}</b><span>${D.STORE.sellerAr}</span></div>
+    return `${rcOpen(rc, opt)}
+      ${rcHead(rc, false)}
       ${vatOn && D.STORE.vat ? `<div class="rc-c">الرقم الضريبي: <span class="mono">${D.STORE.vat}</span></div>` : ''}
-      <hr class="rc-hr"><div class="rc-c rc-t">${vatOn ? 'إشعار دائن' : 'إشعار مرتجع'}<br><span class="mono" style="font-weight:500;font-size:11px">${vatOn ? 'Credit Note' : 'Refund Note'}</span></div><hr class="rc-hr">
+      <hr class="rc-hr"><div class="rc-c rc-t">${vatOn ? 'إشعار دائن' : 'إشعار مرتجع'}<br><span class="mono rc-sub">${vatOn ? 'Credit Note' : 'Refund Note'}</span></div><hr class="rc-hr">
       ${kv('رقم الإشعار', r.cn)}${kv('مرجع الفاتورة', o.inv)}${kv('التاريخ', `${D.dateNum(r.ts)} ${D.time24(r.ts)}`)}${kv('السبب', `<span style="font-family:var(--f)">${D.esc(r.reason)}</span>`)}
       <hr class="rc-hr">${rows}<hr class="rc-hr">
       ${vatOn ? kv('المبلغ قبل الضريبة', D.fmt(r.a - (r.vat || 0))) + kv('ضريبة القيمة المضافة 15%', D.fmt(r.vat || 0)) : ''}
@@ -1057,9 +1096,9 @@
   D.zHTML = (sh, st) => {
     const by = st.by;
     const row = (a, b) => `<div class="rc-kv"><span>${a}</span><span>${b}</span></div>`;
-    return `<div class="receipt print">
-      <div class="rc-logo rc-c"><b>${D.STORE.nameEn}</b><span>${D.STORE.sellerAr}</span></div>
-      <hr class="rc-hr"><div class="rc-c rc-t">${sh.close ? 'تقرير Z — إقفال وردية' : 'تقرير X — منتصف الوردية'}<br><span class="mono" style="font-weight:500;font-size:11px">${sh.z || 'X-' + D.time24(Date.now()).replace(':', '')}</span></div><hr class="rc-hr">
+    return `${rcOpen(D.rc(), { print: true })}
+      ${rcHead(D.rc(), false)}
+      <hr class="rc-hr"><div class="rc-c rc-t">${sh.close ? 'تقرير Z — إقفال وردية' : 'تقرير X — منتصف الوردية'}<br><span class="mono rc-sub">${sh.z || 'X-' + D.time24(Date.now()).replace(':', '')}</span></div><hr class="rc-hr">
       ${row('الكاشير', `<span style="font-family:var(--f)">${D.esc(D.staff(sh.user).short)} · كاشير ${sh.reg}</span>`)}
       ${row('من', `${D.dateNum(sh.open)} ${D.time24(sh.open)}`)}${row('إلى', sh.close ? `${D.dateNum(sh.close)} ${D.time24(sh.close)}` : 'مفتوحة')}
       <hr class="rc-hr">${row('عدد الفواتير', st.count)}${row('إجمالي المبيعات', D.fmt(st.total))}${D.vatOn() || st.vat ? row('منها ضريبة 15%', D.fmt(st.vat)) : ''}${row('الخصومات', D.fmt(st.disc))}${row('المرتجعات', D.fmt(st.refunds))}
@@ -1349,7 +1388,15 @@
     let root = document.querySelector('.print-root');
     if (!root) { root = document.createElement('div'); root.className = 'print-root'; document.body.appendChild(root); }
     root.innerHTML = html.replace('receipt print', 'receipt');
-    setTimeout(() => window.print(), 60);
+    // مقاس الورقة من إعداد الفاتورة (عرض الرول) — الطول تلقائي
+    const rc = root.querySelector('.receipt');
+    const w = (rc && parseFloat(rc.style.getPropertyValue('--rc-w'))) || 80;
+    let pg = document.getElementById('rcPage');
+    if (!pg) { pg = document.createElement('style'); pg.id = 'rcPage'; document.head.appendChild(pg); }
+    pg.textContent = `@media print{@page{size:${w}mm auto;margin:0}}`;
+    const img = root.querySelector('img.rc-img');
+    const fire = () => setTimeout(() => window.print(), 60);
+    if (img && !img.complete) { let done = false; const go = () => { if (!done) { done = true; fire(); } }; img.addEventListener('load', go); img.addEventListener('error', go); setTimeout(go, 1500); } else fire();
   };
 
   /* ---------- live loop ---------- */

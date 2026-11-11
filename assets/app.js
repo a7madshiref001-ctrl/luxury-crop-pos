@@ -34,7 +34,9 @@
     { id: 'team', en: 'Team', ar: 'الفريق', ic: 'shield', perm: 'team' },
     { id: 'settings', en: 'Settings', ar: 'الإعدادات', ic: 'gear', perm: 'settings' },
   ];
-  let route = (location.hash || '#sell').slice(1).split('?')[0] || 'sell';
+  const hash0 = ((location.hash || '#sell').slice(1).split('?')[0] || 'sell').split('/');
+  let route = hash0[0];
+  let setTab = hash0[1] || ''; // القسم المفتوح جوه الإعدادات (app.html#settings/receipt)
   const wantGuide = route === 'guide'; // app.html#guide بيفتح الجولات بعد الدخول
   if (!ROUTES.some((r) => r.id === route)) route = 'sell';
 
@@ -1690,54 +1692,226 @@
   /* =====================================================================
      SETTINGS
      ===================================================================== */
-  function renderSettingsLive(view) {
+  // الإعدادات قوائم فرعية: قائمة أقسام على الجنب (شريط فوق في الموبايل) + بحث، والقسم المفتوح بس هو اللي بيترسم
+  function setFrame(view, lead, secs, again, foot) {
     view.className = 'view';
+    const cur = secs.find((x) => x.id === setTab) || secs[0];
+    setTab = cur.id;
+    view.innerHTML = `<div class="vh"><div><span class="label">Settings · ${esc(D.STORE.branchEn || '')}</span><h1>Setup</h1><p>${lead}</p></div></div>
+      <div class="sets"><nav class="sets__nav" aria-label="أقسام الإعدادات">
+        <label class="sets__find">${I('search', 'sm')}<input class="input" id="setQ" type="search" placeholder="ابحث عن إعداد…" autocomplete="off"></label>
+        <div class="sets__list" id="setList">${secs.map((x) => `<button class="sets__i${x.id === cur.id ? ' on' : ''}" data-set="${x.id}" data-k="${esc((x.en + ' ' + x.ar + ' ' + (x.k || '')).toLowerCase())}">${I(x.ic, 'sm')}${bi(x.en, x.ar)}${I('chev', 'sm sets__c')}</button>`).join('')}<div class="sets__none" id="setNone" hidden>لا يوجد إعداد بهذا الاسم</div></div></nav>
+        <div class="sets__body"><div class="sets__t"><h2>${cur.en}</h2><span>${cur.ar}</span></div>${cur.raw ? cur.html() : `<div class="grid${cur.one ? '' : ' g2'}" style="align-items:start${cur.one ? ';max-width:720px' : ''}">${cur.html()}</div>`}</div></div>${foot || ''}`;
+    const open = (id) => { setTab = id; history.replaceState(null, '', '#settings/' + id); again(); };
+    $$('[data-set]', view).forEach((b) => b.addEventListener('click', () => { if (b.dataset.set !== setTab) open(b.dataset.set); }));
+    const q = $('#setQ', view);
+    const hits = () => $$('[data-set]', view).filter((b) => !b.hidden);
+    q.addEventListener('input', () => { const t = q.value.trim().toLowerCase(); $$('[data-set]', view).forEach((b) => { b.hidden = !!t && !b.dataset.k.includes(t); }); $('#setNone', view).hidden = hits().length > 0; });
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && q.value.trim() && hits()[0]) open(hits()[0].dataset.set); });
+    const act = $('.sets__i.on', view), list = $('#setList', view);
+    if (act && list.scrollWidth > list.clientWidth) list.scrollLeft += act.getBoundingClientRect().left - list.getBoundingClientRect().left - (list.clientWidth - act.offsetWidth) / 2;
+  }
+
+  /* ---------- Receipt designer — شكل الفاتورة ---------- */
+  let rcCustomW = false;
+  const RC_WIDTHS = [58, 72, 80];
+  function rcSample() {
+    const s = S();
+    const ok = (id) => D.PRODUCTS.find((p) => p.id === id && !p.offer);
+    const all = D.PRODUCTS.filter((p) => !p.offer);
+    const pick = [ok(TP.drink) || all[0], ok(TP.food) || all[Math.min(all.length - 1, 6)]].filter(Boolean);
+    const lines = pick.map((p, i) => { const l = { pid: p.id, qty: i ? 1 : 2, mods: D.defMods(p) }; l.total = D.lineTotal(s, l); return l; });
+    const c = D.calc(s, lines, null);
+    const tend = Math.max(50, Math.ceil(c.total / 50) * 50);
+    return { id: 'sample', inv: 'INV-000000', no: 27, ts: Date.now(), staff: me, reg: 1, ch: 'counter', type: 'takeaway', lines, disc: null, pays: [{ m: 'cash', a: c.total }], cash: { tendered: tend, change: D.r2(tend - c.total) }, total: c.total, vat: c.vat, net: c.net, cust: null };
+  }
+  function tplSvg(id) {
+    const ln = (y, x, w, c) => `<rect x="${x}" y="${y}" width="${w}" height="2" rx="1" fill="${c || '#B9B2A6'}"/>`;
+    const rows = (y0, n, gap) => Array.from({ length: n }, (_, i) => ln(y0 + i * gap, 30, 18) + ln(y0 + i * gap, 6, 9)).join('');
+    const body = {
+      classic: `${ln(7, 17, 20, '#111')}${ln(12, 21, 12)}<path d="M6 18h42M6 46h42" stroke="#999" stroke-dasharray="2 2"/>${rows(24, 4, 5.5)}${ln(52, 30, 18, '#111')}${ln(52, 6, 11, '#111')}${ln(62, 19, 16)}`,
+      modern: `${ln(7, 28, 20, '#111')}${ln(12, 36, 12)}<rect x="6" y="18" width="42" height="10" rx="1.5" fill="#111"/><rect x="9" y="21" width="9" height="4" rx="1" fill="#fff"/>${rows(33, 3, 5.5)}<rect x="6" y="51" width="42" height="8" rx="1.5" fill="#111"/><rect x="9" y="54" width="11" height="2" rx="1" fill="#fff"/><rect x="33" y="54" width="12" height="2" rx="1" fill="#fff"/>${ln(64, 19, 16)}`,
+      table: `${ln(7, 17, 20, '#111')}<path d="M6 16h42" stroke="#111"/>${ln(19, 34, 14, '#111')}${ln(19, 20, 6, '#111')}${ln(19, 6, 8, '#111')}<path d="M6 24h42" stroke="#111"/>${[28, 34, 40, 46].map((y) => ln(y, 32, 16) + ln(y, 20, 5) + ln(y, 6, 8)).join('')}<rect x="6.5" y="52.5" width="41" height="8" fill="none" stroke="#111"/>${ln(55.5, 31, 13, '#111')}${ln(55.5, 10, 9, '#111')}`,
+      compact: `${ln(7, 19, 16, '#111')}<path d="M6 13h42M6 34h42" stroke="#999" stroke-dasharray="2 2"/>${rows(17, 4, 4)}${ln(38, 30, 18, '#111')}${ln(38, 6, 11, '#111')}${ln(44, 21, 12)}`,
+    }[id];
+    return `<svg viewBox="0 0 54 ${id === 'compact' ? 52 : 72}" aria-hidden="true"${id === 'compact' ? ' style="height:52px"' : ''}><rect width="54" height="72" fill="#fff"/>${body}</svg>`;
+  }
+  function rcDesigner() {
+    const r = D.rc(); const s = S();
+    const sw = (k) => `<button class="switch ${r[k] ? 'on' : ''}" data-rc="${k}" aria-label="${k}"></button>`;
+    const row = (k, t, d) => `<div class="set-row"><span><b>${t}</b><small>${d}</small></span>${sw(k)}</div>`;
+    const rng = (k, t, d, unit) => { const [lo, hi] = D.RC_LIM[k]; return `<div class="rng"><span><b>${t}</b><small>${d}</small></span><input type="range" data-rng="${k}" data-u="${unit}" min="${lo}" max="${hi}" step="1" value="${r[k]}" aria-label="${t}"><output data-out="${k}">${r[k]} ${unit}</output></div>`; };
+    const txt = (k, t, ph, max) => `<label class="field" style="margin-top:12px"><span>${t}</span><input class="input" data-rct="${k}" maxlength="${max}" placeholder="${esc(ph)}" value="${esc(r[k] || '')}"></label>`;
+    const custom = rcCustomW || !RC_WIDTHS.includes(r.w);
+    const src = r.img || (D.CFG.brand && D.CFG.brand.mark) || '';
+    const tpl = D.RC_TPLS.find((t) => t.id === r.tpl);
+    return `<div class="rcd">
+      <div class="rcd__opts">
+        <div class="card"><div class="card__h"><h3><span class="label">Template</span>شكل الفاتورة</h3><span class="pill">${tpl.ar}</span></div>
+          <div class="tpls">${D.RC_TPLS.map((t) => `<button class="tpl${t.id === r.tpl ? ' on' : ''}" data-tpl="${t.id}">${tplSvg(t.id)}${bi(t.en, t.ar)}<span class="tpl__s">${t.sub}</span></button>`).join('')}</div>
+          <p class="muted" style="font-size:12px;margin-top:10px">اختيار الشكل يضبط بعض الخيارات التي تناسبه، وتستطيع تغيير أي خيار بعده.</p></div>
+        <div class="card"><div class="card__h"><h3><span class="label">Paper · Margins</span>مقاس الورق والهوامش</h3></div>
+          <div class="set-row"><span><b>عرض الورق</b><small>عرض رول الطابعة — الطول يتحدد تلقائيًا حسب الطلب</small></span><div class="seg" id="rcW">${RC_WIDTHS.map((w) => `<button data-w="${w}" class="${!custom && r.w === w ? 'on' : ''}">${w} mm</button>`).join('')}<button data-w="c" class="${custom ? 'on' : ''}">${bi('Custom', 'مخصص')}</button></div></div>
+          ${custom ? `<div class="set-row"><span><b>عرض مخصص</b><small>من ${D.RC_LIM.w[0]} إلى ${D.RC_LIM.w[1]} مليمتر</small></span><input class="input mono" type="number" inputmode="numeric" data-rcn="w" min="${D.RC_LIM.w[0]}" max="${D.RC_LIM.w[1]}" value="${r.w}" aria-label="عرض مخصص"></div>` : ''}
+          ${rng('mx', 'الهامش الجانبي', 'المسافة من يمين ويسار الورقة', 'mm')}
+          ${rng('mt', 'الهامش العلوي', 'المسافة قبل أول سطر', 'mm')}
+          ${rng('mb', 'الهامش السفلي', 'مسافة بعد آخر سطر — زوّدها لو القص يأكل من الفاتورة', 'mm')}</div>
+        <div class="card"><div class="card__h"><h3><span class="label">Text · Lines</span>الخط والفواصل</h3></div>
+          ${rng('fs', 'حجم الخط', 'يكبّر أو يصغّر كل نصوص الفاتورة معًا', 'px')}
+          <div class="set-row"><span><b>الفواصل بين الأقسام</b><small>شكل الخط الفاصل</small></span><div class="seg" id="rcSep">${[['dash', 'Dashed', 'متقطع'], ['solid', 'Solid', 'متصل'], ['none', 'None', 'بدون']].map(([v, en, ar]) => `<button data-sep="${v}" class="${r.sep === v ? 'on' : ''}">${bi(en, ar)}</button>`).join('')}</div></div>
+          ${row('heavy', 'خط عريض وغامق', 'يفيد لو طباعة الطابعة الحرارية باهتة')}</div>
+        <div class="card"><div class="card__h"><h3><span class="label">Header</span>رأس الفاتورة</h3></div>
+          ${row('logo', 'شعار المحل', 'صورة الشعار أعلى الفاتورة — تُطبع بالأبيض والأسود')}
+          ${r.logo ? `<div class="set-row"><span><b>صورة الشعار</b><small>${r.img ? 'صورة مرفوعة من هذا الجهاز' : src ? 'شعار المحل الحالي' : 'لا توجد صورة — ارفع شعار المحل'}</small></span><span class="rcd__logo">${src ? `<img src="${esc(src)}" alt="">` : ''}<button class="btn btn--ghost btn--sm" id="rcUp">${bi('Upload', 'رفع صورة')}</button>${r.img ? `<button class="btn btn--ghost btn--sm" id="rcRm">${bi('Remove', 'حذف')}</button>` : ''}</span></div>${rng('logoW', 'حجم الشعار', 'عرض الصورة على الورقة', 'mm')}` : ''}
+          ${row('nameEn', 'الاسم بالإنجليزي', esc(D.STORE.nameEn || '—'))}
+          ${row('addr', 'العنوان', esc(D.STORE.addr || 'غير مكتوب — من Store'))}
+          ${row('phone', 'رقم الهاتف', esc(D.STORE.phone || 'غير مكتوب — من Store'))}
+          ${row('cr', 'السجل التجاري', esc(D.STORE.cr || 'غير مكتوب — من Store'))}
+          ${txt('head', 'سطر إضافي تحت بيانات المحل', 'مثال: حساب الإنستجرام أو كلمة الواي فاي', 60)}</div>
+        <div class="card"><div class="card__h"><h3><span class="label">Order details</span>بيانات الطلب والأصناف</h3></div>
+          ${row('bigNo', 'رقم الطلب بخط كبير', 'مربع واضح أعلى الفاتورة — يسهّل النداء على العميل')}
+          ${row('cashier', 'اسم الكاشير', 'من نفّذ البيع ورقم الكاشير')}
+          ${row('type', 'نوع الطلب', 'سفري، محلي، أو رقم الطاولة')}
+          ${row('itemEn', 'اسم الصنف بالإنجليزي', 'سطر صغير تحت كل صنف — الإضافات تظهر دائمًا')}
+          ${row('cur', 'سطر العملة', '«المبالغ بالريال السعودي» تحت الإجمالي')}</div>
+        <div class="card"><div class="card__h"><h3><span class="label">Footer</span>ذيل الفاتورة</h3></div>
+          ${row('loyal', 'رصيد كارت الولاء', 'عدد الأختام للعميل المسجّل على الطلب')}
+          ${row('thanks', 'رسالة الشكر', 'آخر سطر في الفاتورة')}
+          ${txt('foot', 'نص رسالة الشكر', D.CFG.thanks || 'شكرًا لزيارتكم', 80)}
+          ${txt('note', 'سطر إضافي قبل رسالة الشكر', 'مثال: سياسة الاستبدال أو عرض الأسبوع', 90)}</div>
+        <div class="card"><div class="card__h"><h3><span class="label">Printing</span>الطباعة</h3></div>
+          <div class="set-row"><span><b>طباعة الفاتورة تلقائيًا</b><small>بعد كل عملية دفع — من نافذة الطباعة</small></span><button class="switch ${s.settings.printer ? 'on' : ''}" data-sw="printer"></button></div>
+          <div class="blind">${I('print', 'sm')}<span>اختر في نافذة الطباعة نفس مقاس الورق، واجعل Margins = None مرة واحدة، والمتصفح يتذكّرها.</span></div></div>
+      </div>
+      <div class="rcd__prev"><div class="card"><div class="card__h"><h3><span class="label">Live preview</span>المعاينة</h3><span class="pill pill--go"><i class="dot pulse"></i> مباشر</span></div>
+        <div class="rcd__stage" id="rcPrev"></div><div class="rcd__dim" id="rcDim"></div>
+        <div class="rcd__act"><button class="btn btn--ink" id="rcTest">${I('print', 'sm')}${bi('Print test', 'اطبع تجربة')}</button><button class="btn btn--ghost" id="rcReset">${bi('Reset', 'الشكل الأصلي')}</button></div>
+        <p class="muted" style="font-size:12px;margin-top:10px">الشكل يُطبَّق على فاتورة البيع وإشعار المرتجع وتقارير الوردية. المعاينة بطلب تجريبي ولا تُسجَّل.</p></div></div>
+    </div>`;
+  }
+  function wireRc(view, again) {
+    const draft = D.rc(); const sample = rcSample();
+    const paint = () => {
+      $('#rcPrev', view).innerHTML = D.receiptHTML(sample, { rc: draft, sample: 1 });
+      $('#rcDim', view).textContent = `${draft.w} mm · margins ${draft.mx}/${draft.mt}/${draft.mb} mm · ${draft.fs} px`;
+    };
+    const save = (patch, msg, redo) => {
+      D.mutate((st) => { st.settings.rc = Object.assign({}, st.settings.rc, patch); D.log(me, 'settings', `شكل الفاتورة: ${msg}`); }, 'set');
+      if (redo) again(); else { Object.assign(draft, patch); paint(); }
+    };
+    paint();
+    $$('[data-tpl]', view).forEach((b) => b.addEventListener('click', () => { const t = D.RC_TPLS.find((x) => x.id === b.dataset.tpl); save(Object.assign({ tpl: t.id }, t.set), `القالب ${t.ar}`, true); }));
+    $$('[data-rc]', view).forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.rc, v = !draft[k];
+      const name = b.closest('.set-row').querySelector('b').textContent;
+      if (k === 'logo') { save({ logo: v }, `${name} — ${v ? 'تشغيل' : 'إيقاف'}`, true); return; }
+      b.classList.toggle('on', v); save({ [k]: v }, `${name} — ${v ? 'تشغيل' : 'إيقاف'}`);
+    }));
+    $$('[data-rng]', view).forEach((el) => {
+      const k = el.dataset.rng;
+      el.addEventListener('input', () => { draft[k] = +el.value; $(`[data-out="${k}"]`, view).textContent = `${el.value} ${el.dataset.u}`; paint(); });
+      el.addEventListener('change', () => save({ [k]: +el.value }, `${el.closest('.rng').querySelector('b').textContent} ${el.value} ${el.dataset.u}`));
+    });
+    $('#rcW', view).addEventListener('click', (e) => { const b = e.target.closest('[data-w]'); if (!b) return; if (b.dataset.w === 'c') { rcCustomW = true; again(); return; } rcCustomW = false; save({ w: +b.dataset.w }, `عرض الورق ${b.dataset.w} مم`, true); });
+    $('#rcSep', view).addEventListener('click', (e) => { const b = e.target.closest('[data-sep]'); if (!b) return; save({ sep: b.dataset.sep }, `الفواصل — ${b.querySelector('small').textContent}`, true); });
+    $$('[data-rcn]', view).forEach((el) => {
+      const k = el.dataset.rcn, [lo, hi] = D.RC_LIM[k];
+      const val = () => Math.min(hi, Math.max(lo, Math.round(+el.value) || lo));
+      el.addEventListener('input', () => { if (+el.value >= lo && +el.value <= hi) { draft[k] = val(); paint(); } });
+      el.addEventListener('change', () => { el.value = val(); save({ [k]: val() }, `عرض الورق ${val()} مم`); });
+    });
+    $$('[data-rct]', view).forEach((el) => {
+      const k = el.dataset.rct;
+      el.addEventListener('input', () => { draft[k] = el.value; paint(); });
+      el.addEventListener('change', () => save({ [k]: el.value.trim() }, `${el.closest('.field').querySelector('span').textContent}`));
+    });
+    const up = $('#rcUp', view);
+    if (up) up.addEventListener('click', () => {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp';
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const url = URL.createObjectURL(f); const im = new Image();
+        const bad = () => { URL.revokeObjectURL(url); D.toast('تعذّر قراءة الصورة', 'اختر صورة PNG أو JPG', { warn: 1, ic: 'alert' }); };
+        im.onerror = bad;
+        im.onload = () => {
+          const w0 = im.naturalWidth, h0 = im.naturalHeight; if (!w0 || !h0) { bad(); return; }
+          const k = Math.min(1, 360 / Math.max(w0, h0));
+          const cv = document.createElement('canvas'); cv.width = Math.round(w0 * k); cv.height = Math.round(h0 * k);
+          const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(im, 0, 0, cv.width, cv.height);
+          let out = cv.toDataURL('image/png'); if (out.length > 120000) out = cv.toDataURL('image/jpeg', .85);
+          URL.revokeObjectURL(url);
+          save({ img: out, logo: true }, 'رفع صورة شعار جديدة', true);
+        };
+        im.src = url;
+      });
+      inp.click();
+    });
+    const rm = $('#rcRm', view); if (rm) rm.addEventListener('click', () => save({ img: '' }, 'حذف صورة الشعار المرفوعة', true));
+    $('#rcTest', view).addEventListener('click', () => D.print(D.receiptHTML(sample, { sample: 1 })));
+    $('#rcReset', view).addEventListener('click', () => {
+      const m = D.modal(`${D.head(bi('Reset receipt design', 'رجوع للشكل الأصلي'), 'القالب والمقاس والهوامش والنصوص ترجع كما كانت أول مرة')}
+        <div class="modal__b"><div class="blind">${I('alert', 'sm')}<span>بيانات المحل والفواتير المسجّلة لا تتأثر. الشعار المرفوع يُحذف.</span></div></div>
+        <div class="modal__f"><button class="btn btn--ghost" data-close>${bi('Cancel', 'إلغاء')}</button><button class="btn btn--ink" id="rcYes">${bi('Reset', 'رجّع الأصلي')}</button></div>`, { cls: 'modal--sm' });
+      $('#rcYes', m).addEventListener('click', () => { rcCustomW = false; D.mutate((st) => { delete st.settings.rc; D.log(me, 'settings', 'شكل الفاتورة: رجوع للشكل الأصلي'); }, 'set'); m.close(); again(); });
+    });
+  }
+  const RC_KEYS = 'فاتورة إيصال طباعة قالب شكل تصميم مقاس حجم عرض هوامش أطراف ورق خط شعار لوجو رسالة شكر receipt invoice print paper margin size template logo font';
+
+  function renderSettingsLive(view) {
     const s = S();
     const vatOn = s.settings.vatOn !== false;
     const sw = (k, on) => `<button class="switch ${on ? 'on' : ''}" data-sw="${k}"></button>`;
     const cn = D.CFG.connect || {};
     const days = (s.days || []).length;
-    view.innerHTML = `<div class="vh"><div><span class="label">Settings · ${esc(D.STORE.branchEn || '')}</span><h1>Setup</h1><p>بيانات المحل والضريبة والتشغيل والبيانات.</p></div></div>
-      <div class="grid g2" style="align-items:start">
-        <div class="card"><div class="card__h"><h3><span class="label">Store · Tax</span>المحل والفاتورة</h3><button class="btn btn--ghost btn--sm" id="editStore">${bi('Edit', 'تعديل')}</button></div>
+    const again = () => renderSettingsLive(view);
+    setFrame(view, 'كل إعداد في قسمه — اختر القسم من القائمة أو ابحث باسم الإعداد.', [
+      { id: 'store', ic: 'store', en: 'Store', ar: 'المحل والضريبة', k: 'اسم عنوان هاتف فرع ضريبة رقم ضريبي سجل تجاري مرتجع vat tax name address', html: () => `<div class="card"><div class="card__h"><h3><span class="label">Store · Tax</span>المحل والفاتورة</h3><button class="btn btn--ghost btn--sm" id="editStore">${bi('Edit', 'تعديل')}</button></div>
           <div class="set-row"><span><b>${esc(D.STORE.nameAr)}</b><small>${esc(D.STORE.nameEn || '')} · ${esc(D.STORE.branchAr || '')}${D.STORE.addr ? ' · ' + esc(D.STORE.addr) : ''}</small></span></div>
           <div class="set-row"><span><b>${vatOn ? 'مسجّل في ضريبة القيمة المضافة' : 'غير مسجّل في الضريبة'}</b><small>${vatOn ? 'الرقم الضريبي: <span class="mono">' + esc(D.STORE.vat || '—') + '</span>' : 'يصدر إيصال بيع بدون ضريبة ولا QR'}</small></span><span class="pill ${vatOn ? 'pill--go' : ''}">${vatOn ? 'فاتورة ضريبية + QR' : 'إيصال'}</span></div>
           ${vatOn ? `<div class="set-row"><span><b>الربط مع منصة «فاتورة» — المرحلة الثانية</b><small>تسجيل الجهاز والختم التشفيري والإبلاغ خلال 24 ساعة — يُنفَّذ مع مزوّد معتمد قبل موعد الموجة</small></span><span class="pill pill--amber">غير مفعّل</span></div>` : ''}
           <div class="set-row"><span><b>${D.noteName().ar} لكل مرتجع</b><small>برقم تسلسلي ومرتبط بالفاتورة الأصلية</small></span><span class="pill pill--go">${I('check', 'sm')}</span></div></div>
-        <div class="card"><div class="card__h"><h3><span class="label">Online menu</span>الربط مع المنيو الأونلاين</h3><span class="pill ${cn.enabled ? 'pill--go' : 'pill--amber'}">${cn.enabled ? 'مفعّل' : 'جاهز — غير مربوط'}</span></div>
-          <div class="set-row"><span><b>نفس أكواد الأصناف</b><small>${D.PRODUCTS.filter((p) => !p.offer).length} صنف و${D.PRODUCTS.filter((p) => p.offer).length} عروض بنفس الأكواد الموجودة في المنيو الحالي</small></span><span class="pill pill--go">${I('check', 'sm')}</span></div>
-          <div class="set-row"><span><b>طلبات الطاولة تنزل هنا</b><small>بتظهر في Orders، والتحصيل عند الكاشير، وحالتها بتتحدّث في المنيو</small></span><span class="pill">${cn.enabled ? 'يعمل' : 'بعد الربط'}</span></div>
-          ${cn.enabled ? '<div id="cloudBox"></div>' : '<p class="muted" style="font-size:12px;margin-top:8px">الربط متوقف عن قصد. يتفعّل يوم التشغيل بخطوة واحدة في ملف الإعدادات.</p>'}</div>
-        <div class="card"><div class="card__h"><h3><span class="label">Operations</span>طريقة التشغيل</h3></div>
+        <div class="card"><div class="card__h"><h3><span class="label">Receipt</span>شكل الفاتورة</h3></div>
+          <div class="set-row"><span><b>القالب والمقاس والهوامش</b><small>${D.RC_TPLS.find((t) => t.id === D.rc().tpl).ar} · ${D.rc().w} مم</small></span><button class="btn btn--ghost btn--sm" data-goset="receipt">${bi('Design', 'عدّل الشكل')}</button></div></div>` },
+      { id: 'receipt', ic: 'print', en: 'Receipt', ar: 'شكل الفاتورة', k: RC_KEYS, raw: 1, html: rcDesigner },
+      { id: 'ops', ic: 'gear', en: 'Operations', ar: 'طريقة التشغيل', k: 'قبول تلقائي إضافات ولاء خصم قفل تلقائي صوت تنبيهات طباعة تلقائية pin lock loyalty', html: () => `<div class="card"><div class="card__h"><h3><span class="label">Orders</span>الطلبات والبيع</h3></div>
           <div class="set-row"><span><b>قبول تلقائي لطلبات المنيو</b><small>تصل للباريستا مباشرة</small></span>${sw('autoAccept', s.settings.autoAccept)}</div>
-          <div class="set-row"><span><b>صوت التنبيهات</b><small>طلب جديد، طلب جاهز، قارئ الباركود</small></span>${sw('sound', s.settings.sound)}</div>
-          <div class="set-row"><span><b>طباعة الفاتورة تلقائيًا</b><small>من نافذة الطباعة على الطابعة الحرارية 80مم</small></span>${sw('printer', s.settings.printer)}</div>
           <div class="set-row"><span><b>اسأل عن الإضافات عند كل صنف</b><small>لو مقفول: الضغطة تضيف الصنف مباشرة، والإضافات والملاحظة من سطر الصنف في الطلب</small></span>${sw('askMods', s.settings.askMods)}</div>
-          <div class="set-row"><span><b>قفل تلقائي</b><small>يقفل الشاشة بعد مدة بدون استخدام ويطلب PIN — الطلب المفتوح لا يتأثر</small></span><div class="seg" id="al">${[0, 2, 5, 10].map((n) => `<button data-n="${n}" class="${+(s.settings.autoLock || 0) === n ? 'on' : ''}">${n ? n + ' د' : 'Off'}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>كارت الولاء</b><small>عدد المشروبات مقابل مشروب هدية</small></span><div class="seg" id="ln">${[5, 6, 8, 10].map((n) => `<button data-n="${n}" class="${s.settings.loyalNeed === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>حد خصم الكاشير</b><small>ما يزيد عن ذلك يحتاج موافقة المشرف</small></span><span class="pill">10%</span></div></div>
-        <div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
-          ${[['print', 'طابعة الفواتير', 'أي طابعة حرارية 80مم معرّفة على الجهاز — الطباعة من نافذة الطباعة', 'test-print'], ['drawer', 'درج الكاش', 'يفتح مع الطابعة (إعداد «فتح الدرج» في تعريف الطابعة)', ''], ['card', 'جهاز الشبكة (مدى)', 'جهاز منفصل — المبلغ يُكتب على الجهاز', ''], ['scan', 'قارئ الباركود', 'يعمل مباشرة كلوحة مفاتيح', ''], ['user', 'شاشة العميل', 'شاشة ثانية على نفس الجهاز أو تابلت مربوط (Devices)', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span>${a ? `<button class="btn btn--soft btn--sm" data-test="${a}">${a === 'test-print' ? 'اطبع تجربة' : 'افتح'}</button>` : ''}</div>`).join('')}</div>
-        <div class="card"><div class="card__h"><h3><span class="label">Data</span>البيانات</h3></div>
+        <div class="card"><div class="card__h"><h3><span class="label">Screen · Safety</span>الشاشة والأمان</h3></div>
+          <div class="set-row"><span><b>قفل تلقائي</b><small>يقفل الشاشة بعد مدة بدون استخدام ويطلب PIN — الطلب المفتوح لا يتأثر</small></span><div class="seg" id="al">${[0, 2, 5, 10].map((n) => `<button data-n="${n}" class="${+(s.settings.autoLock || 0) === n ? 'on' : ''}">${n ? n + ' د' : 'Off'}</button>`).join('')}</div></div>
+          <div class="set-row"><span><b>صوت التنبيهات</b><small>طلب جديد، طلب جاهز، قارئ الباركود</small></span>${sw('sound', s.settings.sound)}</div>
+          <div class="set-row"><span><b>طباعة الفاتورة تلقائيًا</b><small>من نافذة الطباعة — المقاس والشكل من قسم Receipt</small></span>${sw('printer', s.settings.printer)}</div></div>` },
+      { id: 'sound', ic: 'bell', en: 'Sounds', ar: 'أصوات الطلبات', k: 'صوت نغمة جرس علو تكرار tone volume bell', one: 1, html: soundCard },
+      { id: 'routing', ic: 'route', en: 'Stations', ar: 'توجيه التحضير', k: 'باريستا مطبخ توجيه تحضير قسم صنف kitchen barista routing', html: routesCard },
+      { id: 'kiosk', ic: 'kiosk', en: 'Kiosk', ar: 'الكشك والطلب الذاتي', k: 'كشك آيباد طلب ذاتي دفع بطاقة self order ipad', one: 1, html: kioskCard },
+      { id: 'devices', ic: 'link', en: 'Devices', ar: 'الأجهزة والشاشات', k: 'ربط شاشة تابلت طابعة درج كاش مدى شبكة باركود شاشة العميل pair printer drawer', html: () => `${devicesCard()}<div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
+          ${[['print', 'طابعة الفواتير', 'أي طابعة حرارية معرّفة على الجهاز — المقاس من قسم Receipt', 'test-print'], ['drawer', 'درج الكاش', 'يفتح مع الطابعة (إعداد «فتح الدرج» في تعريف الطابعة)', ''], ['card', 'جهاز الشبكة (مدى)', 'جهاز منفصل — المبلغ يُكتب على الجهاز', ''], ['scan', 'قارئ الباركود', 'يعمل مباشرة كلوحة مفاتيح', ''], ['user', 'شاشة العميل', 'شاشة ثانية على نفس الجهاز أو تابلت مربوط (Devices)', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span>${a ? `<button class="btn btn--soft btn--sm" data-test="${a}">${a === 'test-print' ? 'اطبع تجربة' : 'افتح'}</button>` : ''}</div>`).join('')}</div>` },
+      { id: 'online', ic: 'globe', en: 'Online menu', ar: 'المنيو الأونلاين', k: 'ربط موقع منيو طلبات طاولة سيرفر حفظ online website', one: 1, html: () => `<div class="card"><div class="card__h"><h3><span class="label">Online menu</span>الربط مع المنيو الأونلاين</h3><span class="pill ${cn.enabled ? 'pill--go' : 'pill--amber'}">${cn.enabled ? 'مفعّل' : 'جاهز — غير مربوط'}</span></div>
+          <div class="set-row"><span><b>نفس أكواد الأصناف</b><small>${D.PRODUCTS.filter((p) => !p.offer).length} صنف و${D.PRODUCTS.filter((p) => p.offer).length} عروض بنفس الأكواد الموجودة في المنيو الحالي</small></span><span class="pill pill--go">${I('check', 'sm')}</span></div>
+          <div class="set-row"><span><b>طلبات الطاولة تنزل هنا</b><small>بتظهر في Orders، والتحصيل عند الكاشير، وحالتها بتتحدّث في المنيو</small></span><span class="pill">${cn.enabled ? 'يعمل' : 'بعد الربط'}</span></div>
+          ${cn.enabled ? '<div id="cloudBox"></div>' : '<p class="muted" style="font-size:12px;margin-top:8px">الربط متوقف عن قصد. يتفعّل يوم التشغيل بخطوة واحدة في ملف الإعدادات.</p>'}</div>` },
+      { id: 'data', ic: 'download', en: 'Data', ar: 'البيانات والنسخ', k: 'نسخة احتياطية استرجاع تدريب مسح backup restore training reset', one: 1, html: () => `<div class="card"><div class="card__h"><h3><span class="label">Data</span>البيانات</h3></div>
           <div class="set-row"><span><b>نسخة احتياطية</b><small>ملف فيه الإعدادات والموظفين والعملاء والمخزون وكل الأيام المؤرشفة (${days} يوم)</small></span><button class="btn btn--ghost btn--sm" id="backup">${I('download', 'sm')}${bi('Download', 'تنزيل')}</button></div>
           <div class="set-row"><span><b>استرجاع نسخة احتياطية</b><small>يستبدل بيانات هذا الجهاز بملف نسخة سابقة — بموافقة المدير، وبعد تنزيل نسخة من الحالي</small></span><button class="btn btn--ghost btn--sm" id="restore">${I('refund', 'sm')}${bi('Restore', 'استرجاع')}</button></div>
           <div class="set-row"><span><b>وضع التدريب</b><small>نسخة منفصلة بطلبات تجريبية وجولات تفاعلية — لا تلمس أرقام المحل</small></span><button class="btn btn--ghost btn--sm" id="train">${I('play', 'sm')}${bi('Open', 'افتح')}</button></div>
-          <div class="set-row"><span><b>مسح كل البيانات</b><small>يرجع النظام لأول تشغيل — للمدير فقط</small></span><button class="btn btn--danger btn--sm" id="wipe">${bi('Reset', 'مسح')}</button></div></div>
-        ${prepCards()}
-      </div>
-      <p class="muted" style="font-size:12px;margin-top:18px;text-align:center"><a href="https://a7madshiref001-ctrl.github.io/athr/" target="_blank" rel="noopener" lang="en">Built by ATHR</a></p>`;
-    $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); renderSettingsLive(view); }));
-    $('#ln', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; D.log(me, 'settings', `كارت الولاء: كل ${b.dataset.n} مشروبات`); }, 'set'); renderSettingsLive(view); });
-    $('#editStore', view).addEventListener('click', () => storeForm(() => renderSettingsLive(view)));
-    $('#backup', view).addEventListener('click', backup);
-    $('#al', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; const n = +b.dataset.n; D.mutate((st) => { st.settings.autoLock = n; D.log(me, 'settings', n ? `قفل تلقائي بعد ${n} دقائق` : 'إيقاف القفل التلقائي'); }, 'set'); renderSettingsLive(view); });
-    $('#restore', view).addEventListener('click', () => restoreFlow(false));
-    $('#train', view).addEventListener('click', () => { D.mutate(() => D.log(me, 'settings', 'تشغيل وضع التدريب من الإعدادات', null, 'warn'), 'set'); D.setTraining(true); });
-    $('#wipe', view).addEventListener('click', wipeAll);
+          <div class="set-row"><span><b>مسح كل البيانات</b><small>يرجع النظام لأول تشغيل — للمدير فقط</small></span><button class="btn btn--danger btn--sm" id="wipe">${bi('Reset', 'مسح')}</button></div></div>` },
+    ], again, `<p class="muted" style="font-size:12px;margin-top:18px;text-align:center"><a href="https://a7madshiref001-ctrl.github.io/athr/" target="_blank" rel="noopener" lang="en">Built by ATHR</a></p>`);
+    const on = (sel, ev, fn) => { const el = $(sel, view); if (el) el.addEventListener(ev, fn); };
+    $$('[data-goset]', view).forEach((b) => b.addEventListener('click', () => { setTab = b.dataset.goset; history.replaceState(null, '', '#settings/' + setTab); again(); }));
+    $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); again(); }));
+    on('#ln', 'click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; D.log(me, 'settings', `كارت الولاء: كل ${b.dataset.n} مشروبات`); }, 'set'); again(); });
+    on('#editStore', 'click', () => storeForm(again));
+    on('#backup', 'click', backup);
+    on('#al', 'click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; const n = +b.dataset.n; D.mutate((st) => { st.settings.autoLock = n; D.log(me, 'settings', n ? `قفل تلقائي بعد ${n} دقائق` : 'إيقاف القفل التلقائي'); }, 'set'); again(); });
+    on('#restore', 'click', () => restoreFlow(false));
+    on('#train', 'click', () => { D.mutate(() => D.log(me, 'settings', 'تشغيل وضع التدريب من الإعدادات', null, 'warn'), 'set'); D.setTraining(true); });
+    on('#wipe', 'click', wipeAll);
     if ($('#cloudBox', view) && window.DARJ_CONNECT) window.DARJ_CONNECT.panel($('#cloudBox', view), me);
-    wirePrep(view, () => renderSettingsLive(view));
+    wirePrep(view, again);
+    if (setTab === 'receipt') wireRc(view, again);
     $$('[data-test]', view).forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.test === 'test-print') { const o = D.today(S()).filter((x) => x.inv).slice(-1)[0]; if (o) D.print(D.receiptHTML(o, { copy: 1 })); else D.toast('لا توجد فواتير بعد', 'اطبع بعد أول عملية بيع', { warn: 1 }); }
+      if (b.dataset.test === 'test-print') D.print(D.receiptHTML(rcSample(), { sample: 1 }));
       if (b.dataset.test === 'test-screen') window.open('screen.html?mode=cart', '_blank');
     }));
   }
@@ -1828,40 +2002,46 @@
   }
   function renderSettings(view) {
     if (D.REAL) { renderSettingsLive(view); return; }
-    view.className = 'view';
     const s = S();
     const sw = (k, on) => `<button class="switch ${on ? 'on' : ''}" data-sw="${k}"></button>`;
-    view.innerHTML = `<div class="vh"><div><span class="label">Settings · ${esc(D.STORE.branchEn)}</span><h1>Setup</h1><p>بيانات المنشأة والضريبة والأجهزة وطريقة التشغيل.</p></div></div>
-      <div class="grid g2" style="align-items:start">
-        <div class="card"><div class="card__h"><h3><span class="label">${D.vatOn() ? 'Tax · ZATCA' : 'Business'}</span>${D.vatOn() ? 'المنشأة والفوترة الإلكترونية' : 'بيانات المنشأة'}</h3></div>
+    const again = () => renderSettings(view);
+    setFrame(view, 'كل إعداد في قسمه — اختر القسم من القائمة أو ابحث باسم الإعداد.', [
+      { id: 'store', ic: 'store', en: 'Store', ar: 'المنشأة والضريبة', k: 'اسم منشأة ضريبة رقم ضريبي فاتورة مرتجع vat tax zatca', one: 1, html: () => `<div class="card"><div class="card__h"><h3><span class="label">${D.vatOn() ? 'Tax · ZATCA' : 'Business'}</span>${D.vatOn() ? 'المنشأة والفوترة الإلكترونية' : 'بيانات المنشأة'}</h3></div>
           <div class="set-row"><span><b>اسم المنشأة على الفاتورة</b><small>${esc(D.STORE.sellerAr)}</small></span></div>
           ${D.vatOn() ? `<div class="set-row"><span><b>الرقم الضريبي</b><small class="mono">${D.STORE.vat}</small></span><span class="pill">رقم تجريبي</span></div>` : `<div class="set-row"><span><b>غير مسجّل في الضريبة</b><small>يصدر إيصال بيع بدون ضريبة ولا QR</small></span><span class="pill">إيصال</span></div>`}
           ${D.vatOn() ? `<div class="set-row"><span><b>فاتورة ضريبية مبسطة + QR</b><small>المرحلة الأولى (الإصدار): اسم البائع، الرقم الضريبي، الوقت، الإجمالي، الضريبة</small></span><span class="pill pill--go">${I('check', 'sm')} مفعّل</span></div>` : ''}
           ${D.vatOn() ? `<div class="set-row"><span><b>الربط مع منصة «فاتورة» — المرحلة الثانية</b><small>تسجيل الجهاز (CSID)، الختم التشفيري، والإبلاغ عن الفواتير المبسطة خلال 24 ساعة</small></span><span class="pill pill--amber">يتفعّل عند التشغيل</span></div>` : ''}
           <div class="set-row"><span><b>${D.noteName().ar} لكل مرتجع</b><small>برقم تسلسلي ومرتبط بالفاتورة الأصلية</small></span><span class="pill pill--go">${I('check', 'sm')}</span></div>
-        </div>
-        <div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
-          ${[['print', 'طابعة الفواتير 80مم', 'حرارية — متصلة بالشبكة', 'test-print'], ['cup', 'طابعة تذاكر الباريستا', 'تذكرة لكل مشروب بالإضافات', 'test-kds'], ['drawer', 'درج الكاش', 'يفتح تلقائيًا مع الدفع النقدي', 'test-drawer'], ['card', 'جهاز الشبكة (مدى)', D.LIVE ? 'جهاز منفصل — المبلغ يُكتب على الجهاز' : 'يُرسل المبلغ للجهاز دون إدخال يدوي', 'test-card'], ['scan', 'قارئ الباركود', 'للبن المعبّى والمنتجات', 'test-scan'], ['user', 'شاشة العميل', 'الطلب والإجمالي والأختام', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span><span class="pill pill--go"><i class="dot"></i> متصل</span><button class="btn btn--soft btn--sm" data-test="${a}">اختبار</button></div>`).join('')}
-          <p class="muted" style="font-size:12px;margin-top:8px">الأجهزة في النسخة التجريبية محاكاة، وفي التشغيل الفعلي تُربط حسب أجهزة المحل.</p></div>
-        <div class="card"><div class="card__h"><h3><span class="label">Operations</span>طريقة التشغيل</h3></div>
+          <div class="set-row"><span><b>شكل الفاتورة</b><small>${D.RC_TPLS.find((t) => t.id === D.rc().tpl).ar} · ${D.rc().w} مم</small></span><button class="btn btn--ghost btn--sm" data-goset="receipt">${bi('Design', 'عدّل الشكل')}</button></div>
+        </div>` },
+      { id: 'receipt', ic: 'print', en: 'Receipt', ar: 'شكل الفاتورة', k: RC_KEYS, raw: 1, html: rcDesigner },
+      { id: 'ops', ic: 'gear', en: 'Operations', ar: 'طريقة التشغيل', k: 'قبول تلقائي ولاء خصم صوت تنبيهات طباعة تلقائية لايف loyalty', one: 1, html: () => `<div class="card"><div class="card__h"><h3><span class="label">Operations</span>طريقة التشغيل</h3></div>
           <div class="set-row"><span><b>نشاط لايف في الديمو</b><small>طلبات QR والكاشير 2 تصل تلقائيًا كل فترة</small></span>${sw('live', s.settings.live)}</div>
           <div class="set-row"><span><b>قبول تلقائي لطلبات QR والموقع</b><small>تصل للباريستا مباشرة</small></span>${sw('autoAccept', s.settings.autoAccept)}</div>
           <div class="set-row"><span><b>صوت التنبيهات</b><small>طلب جديد، طلب جاهز، قارئ الباركود</small></span>${sw('sound', s.settings.sound)}</div>
           <div class="set-row"><span><b>طباعة الفاتورة تلقائيًا</b><small>بعد كل عملية دفع</small></span>${sw('printer', s.settings.printer)}</div>
           <div class="set-row"><span><b>كارت الولاء</b><small>عدد المشروبات مقابل مشروب هدية</small></span><div class="seg" id="ln">${[6, 8, 10].map((n) => `<button data-n="${n}" class="${s.settings.loyalNeed === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
           <div class="set-row"><span><b>حد خصم الكاشير</b><small>ما يزيد عن ذلك يحتاج موافقة المشرف</small></span><span class="pill">10%</span></div>
-        </div>
-        <div class="card"><div class="card__h"><h3><span class="label">Demo</span>بيانات العرض</h3></div>
+        </div>` },
+      { id: 'sound', ic: 'bell', en: 'Sounds', ar: 'أصوات الطلبات', k: 'صوت نغمة جرس علو تكرار tone volume bell', one: 1, html: soundCard },
+      { id: 'routing', ic: 'route', en: 'Stations', ar: 'توجيه التحضير', k: 'باريستا مطبخ توجيه تحضير قسم صنف kitchen barista routing', html: routesCard },
+      { id: 'kiosk', ic: 'kiosk', en: 'Kiosk', ar: 'الكشك والطلب الذاتي', k: 'كشك آيباد طلب ذاتي دفع بطاقة self order ipad', one: 1, html: kioskCard },
+      { id: 'devices', ic: 'link', en: 'Devices', ar: 'الأجهزة والشاشات', k: 'ربط شاشة تابلت طابعة درج كاش مدى شبكة باركود شاشة العميل pair printer drawer', html: () => `${devicesCard()}<div class="card"><div class="card__h"><h3><span class="label">Hardware</span>الأجهزة</h3></div>
+          ${[['print', 'طابعة الفواتير', 'حرارية — متصلة بالشبكة', 'test-print'], ['cup', 'طابعة تذاكر الباريستا', 'تذكرة لكل مشروب بالإضافات', 'test-kds'], ['drawer', 'درج الكاش', 'يفتح تلقائيًا مع الدفع النقدي', 'test-drawer'], ['card', 'جهاز الشبكة (مدى)', D.LIVE ? 'جهاز منفصل — المبلغ يُكتب على الجهاز' : 'يُرسل المبلغ للجهاز دون إدخال يدوي', 'test-card'], ['scan', 'قارئ الباركود', 'للبن المعبّى والمنتجات', 'test-scan'], ['user', 'شاشة العميل', 'الطلب والإجمالي والأختام', 'test-screen']].map(([ic, t, d, a]) => `<div class="dev"><span class="dev__i">${I(ic)}</span><span class="dev__b"><b>${t}</b><small>${d}</small></span><span class="pill pill--go"><i class="dot"></i> متصل</span><button class="btn btn--soft btn--sm" data-test="${a}">اختبار</button></div>`).join('')}
+          <p class="muted" style="font-size:12px;margin-top:8px">الأجهزة في النسخة التجريبية محاكاة، وفي التشغيل الفعلي تُربط حسب أجهزة المحل.</p></div>` },
+      { id: 'data', ic: 'download', en: 'Demo data', ar: 'بيانات العرض', k: 'انقطاع إنترنت يوم جديد إعادة ضبط offline reset', one: 1, html: () => `<div class="card"><div class="card__h"><h3><span class="label">Demo</span>بيانات العرض</h3></div>
           <div class="set-row"><span><b>جرّب انقطاع الإنترنت</b><small>البيع يستمر بدون اتصال ويتزامن عند عودته</small></span><button class="btn btn--ghost btn--sm" id="off">${I(s.settings.offline ? 'wifi' : 'wifioff', 'sm')} ${s.settings.offline ? 'أعِد الاتصال' : 'اقطع الاتصال'}</button></div>
           <div class="set-row"><span><b>ابدأ يوم جديد</b><small>يعيد البيانات لحالتها الأولى (طلبات اليوم من الصباح حتى الآن)</small></span><button class="btn btn--danger btn--sm" id="reset">إعادة ضبط</button></div>
-          <p class="muted" style="font-size:12px;margin-top:8px">كل الأسماء والأرقام والطلبات هنا وهمية، ولا تخرج أي بيانات من الجهاز.</p></div>
-        ${prepCards()}
-      </div>`;
-    $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); renderSettings(view); }));
-    $('#ln', view).addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; }, 'set'); renderSettings(view); });
-    $('#off', view).addEventListener('click', toggleNet);
-    wirePrep(view, () => renderSettings(view));
-    $('#reset', view).addEventListener('click', () => { D.reset(); clearCart(); D.toast('بدأ يوم جديد', 'عادت البيانات لحالتها الأولى', { ic: 'sync' }); render(); });
+          <p class="muted" style="font-size:12px;margin-top:8px">كل الأسماء والأرقام والطلبات هنا وهمية، ولا تخرج أي بيانات من الجهاز.</p></div>` },
+    ], again);
+    const on = (sel, ev, fn) => { const el = $(sel, view); if (el) el.addEventListener(ev, fn); };
+    $$('[data-goset]', view).forEach((b) => b.addEventListener('click', () => { setTab = b.dataset.goset; history.replaceState(null, '', '#settings/' + setTab); again(); }));
+    $$('[data-sw]', view).forEach((b) => b.addEventListener('click', () => { const k = b.dataset.sw; D.mutate((st) => { st.settings[k] = !st.settings[k]; D.log(me, 'settings', `إعداد: ${k} — ${st.settings[k] ? 'تشغيل' : 'إيقاف'}`); }, 'set'); again(); }));
+    on('#ln', 'click', (e) => { const b = e.target.closest('[data-n]'); if (!b) return; D.mutate((st) => { st.settings.loyalNeed = +b.dataset.n; }, 'set'); again(); });
+    on('#off', 'click', toggleNet);
+    wirePrep(view, again);
+    if (setTab === 'receipt') wireRc(view, again);
+    on('#reset', 'click', () => { D.reset(); clearCart(); D.toast('بدأ يوم جديد', 'عادت البيانات لحالتها الأولى', { ic: 'sync' }); render(); });
     $$('[data-test]', view).forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.test;
       if (t === 'test-print') { const o = S().orders.slice(-1)[0]; if (o) showReceipt(o, true); }
@@ -1872,7 +2052,6 @@
       if (t === 'test-screen') window.open('screen.html?mode=cart', '_blank');
     }));
   }
-
 
   /* =====================================================================
      STATIONS · KIOSK · DEVICES — توجيه الأصناف، والكشك، وربط الشاشات (جوه الإعدادات)
@@ -2267,7 +2446,7 @@
       closePops(); lockScreen(route);
     }, 10000);
     if (!me || (D.REAL && !S().setup) || (me && !D.STAFF.some((u) => u.id === me))) { me = null; render(); lockScreen(); } else { render(); if (wantGuide && !D.REAL) setTimeout(openGuide, 700); }
-    window.addEventListener('hashchange', () => { const r = location.hash.slice(1); if (r !== route && VIEWS[r]) { const rr = ROUTES.find((x) => x.id === r); if (can(rr.perm)) { route = r; render(); } } });
+    window.addEventListener('hashchange', () => { const h = location.hash.slice(1).split('/'); const r = h[0]; const sub = r === 'settings' && h[1] && h[1] !== setTab; if (sub) setTab = h[1]; if ((r !== route || sub) && VIEWS[r]) { const rr = ROUTES.find((x) => x.id === r); if (can(rr.perm)) { route = r; render(); } } });
   }
   window.DARJ_APP = { go };
   boot();
