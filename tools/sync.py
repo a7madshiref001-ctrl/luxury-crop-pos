@@ -2,7 +2,7 @@
 import io, os, re, shutil
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.abspath(os.path.join(ROOT, '..', 'darj-pos'))
-V = '13'
+V = '14'
 
 for f in ['darj.css', 'darj.js', 'app.js', 'kds.js', 'link.js', 'kiosk.js']:
     shutil.copy(os.path.join(SRC, 'assets', f), os.path.join(ROOT, 'assets', f))
@@ -33,7 +33,7 @@ for page, title in PAGES:
     s = FONTS.sub('', s)
     s = re.sub(r'<link rel="stylesheet" href="assets/darj.css\?v=\d+">', f'<link rel="stylesheet" href="assets/darj.css?v={V}">\n<link rel="stylesheet" href="assets/brand.css?v={V}">', s)
     s = s.replace('<meta name="theme-color" content="#F3EFE7">', '<meta name="theme-color" content="#F4F0E8">')
-    s = re.sub(r'<script src="assets/img.js\?v=\d+"></script>', f'<script src="assets/config.js?v={V}"></script>\n<script src="assets/menu.js?v={V}"></script>', s)
+    s = re.sub(r'<script src="assets/img.js\?v=\d+"></script>', f'<script src="assets/config.js?v={V}"></script>\n<script src="assets/menu.js?v={V}"></script>\n<script src="assets/livemenu.js?v={V}"></script>', s)
     s = re.sub(r'\?v=\d+"', f'?v={V}"', s)
     if page == 'app.html':
         s = s.replace(f'<script src="assets/link.js?v={V}"></script>', f'<script src="assets/link.js?v={V}"></script>\n<script src="assets/connect.js?v={V}"></script>')
