@@ -1,2 +1,4 @@
 tools/cache/
 source/
+tools/qa.js
+tools/qa_cloud.js
