@@ -2,7 +2,7 @@
 import io, os, re, shutil
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.abspath(os.path.join(ROOT, '..', 'darj-pos'))
-V = '14'
+V = '15'
 
 for f in ['darj.css', 'darj.js', 'app.js', 'kds.js', 'link.js', 'kiosk.js']:
     shutil.copy(os.path.join(SRC, 'assets', f), os.path.join(ROOT, 'assets', f))
@@ -37,6 +37,8 @@ for page, title in PAGES:
     s = re.sub(r'\?v=\d+"', f'?v={V}"', s)
     if page == 'app.html':
         s = s.replace(f'<script src="assets/link.js?v={V}"></script>', f'<script src="assets/link.js?v={V}"></script>\n<script src="assets/connect.js?v={V}"></script>')
+        # صفحة إدارة الموقع (للمدير) لازم تتسجّل قبل ما الكاشير يبني القائمة
+        s = s.replace(f'<script src="assets/app.js?v={V}"></script>', f'<script src="assets/admin.js?v={V}"></script>' + chr(10) + f'<script src="assets/app.js?v={V}"></script>')
     s = s.replace('<span class="demo-tag">Demo</span>\n', '')
     s = fin(s)
     io.open(os.path.join(ROOT, page), 'w', encoding='utf-8').write(s)
