@@ -13,6 +13,8 @@ window.DARJ_CONFIG = {
   brand: { mark: 'assets/brand/logo-mark.png', word: 'LUXURY CROP', sub: 'Cashier' },
   phone: true, // جوال المدير: صفحة phone.html بتتربط بـQR من Settings ← Devices زي باقي الشاشات
   loyalNeed: 6,
+  dayResetH: 4, // يوم الشغل من 6 الصبح لحد 4 الفجر: كشف اليوم بيتصفّر ويتأرشف الساعة 4 الفجر
+  shopOpenH: 6,
   welcome: 'أهلًا بك في محصول فاخر — كل 6 طلبات، مشروب ساخن على حسابنا.',
   thanks: 'شكرًا لزيارتكم — محصول فاخر',
   poweredBy: false,
