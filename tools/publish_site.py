@@ -43,3 +43,5 @@ s = io.open(p, encoding='utf-8').read().replace('\r\n', '\n')
 s = re.sub(r'\n?# BEGIN POS.*?# END POS\n', '', s, flags=re.S).rstrip('\n') + '\n\n' + BLOCK
 io.open(p, 'w', encoding='utf-8', newline='\n').write(s)
 print('published to', OUT, 'v' + V, 'inline scripts', len(hashes), 'csp', len(csp))
+# v31: الـcommit نزّل kds.html الجديدة من غير _headers، فكروم منع سكربت الصفحة وشاشة الباريستا والمطبخ فتحت بيضا
+print('!! commit _headers WITH pos/ in the same commit (git add pos _headers), or new inline scripts get blocked by the CSP')
